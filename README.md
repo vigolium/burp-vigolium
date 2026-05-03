@@ -35,13 +35,17 @@ Burp Suite ──► Vigolium Extension ──► Vigolium API Server ──► 
 | HTTP Client | OkHttp |
 | JSON | Gson |
 
-## Build
+## Installation
+
+Download the pre-built jar from [burp-vigolium.jar](https://github.com/vigolium/burp-vigolium/blob/main/burp-vigolium.jar) and load it in Burp via **Extensions > Add**.
+
+## Build (from source)
 
 ```bash
 ./gradlew spotlessApply build
 ```
 
-The output jar is built via Shadow plugin at `build/libs/burp-vigolium.jar`. Load it in Burp via Extensions > Add.
+The output jar is built via Shadow plugin at `build/libs/burp-vigolium.jar`.
 
 ## Configuration
 
