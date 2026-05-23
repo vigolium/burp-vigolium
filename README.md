@@ -2,6 +2,14 @@
 
 A Burp Suite extension that bridges HTTP requests to the Vigolium server-side security scanning engine. Captures requests from Burp, forwards them to Vigolium's API for vulnerability scanning, and displays findings directly in Burp.
 
+- **GitHub:** [github.com/vigolium/vigolium](https://github.com/vigolium/vigolium)
+- **Docs:** [docs.vigolium.com](https://docs.vigolium.com/)
+- **Site:** [www.vigolium.com](https://www.vigolium.com/)
+
+| Vigolium Burp Integration 1 | Vigolium Burp Integration 2 |
+|:---:|:---:|
+| ![Vigolium Burp Integration 1](https://github.com/vigolium/docs/blob/main/images/vigolium-burp-extension-1.png?raw=true) | ![Vigolium Burp Integration 2](https://github.com/vigolium/docs/blob/main/images/vigolium-burp-extension-2.png?raw=true) |
+
 ## Architecture
 
 ```
@@ -49,11 +57,17 @@ The output jar is built via Shadow plugin at `build/libs/burp-vigolium.jar`.
 
 ## Configuration
 
-1. Go to **Vigolium > Settings > Server Connection**
-2. Enter your Vigolium server URL and API key
-3. Click **Test Connection**
-4. Enable **Proxy Mode** to start auto-forwarding traffic
-5. Configure filter rules and scan modules as needed
+First, start the Vigolium server so the extension has an API to connect to:
+
+```bash
+vigolium server -A
+```
+
+Then retrieve the API key to enter in the extension:
+
+```bash
+vigolium config ls server.auth_api_key --force
+```
 
 ## API Endpoints
 
