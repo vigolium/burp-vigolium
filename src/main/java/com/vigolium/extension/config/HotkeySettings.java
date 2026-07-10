@@ -12,4 +12,8 @@ public interface HotkeySettings {
     String getAgentScanHotkey();
 
     void setAgentScanHotkey(String montoyaKey);
+
+    String getSnapshotSitemapHotkey();
+
+    void setSnapshotSitemapHotkey(String montoyaKey);
 }

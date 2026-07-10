@@ -9,6 +9,8 @@ import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
 import javax.swing.*;
+import javax.swing.border.Border;
+import javax.swing.border.CompoundBorder;
 
 public class SettingsTab extends JPanel {
 
@@ -16,43 +18,59 @@ public class SettingsTab extends JPanel {
 
     private final ServerConnectionPanel serverConnectionPanel;
     private final ScanOptionsPanel scanOptionsPanel;
-    private final ProxyModePanel proxyModePanel;
     private final RequestStatsPanel requestStatsPanel;
-    private final FilterRulesPanel filterRulesPanel;
     private final HotkeysPanel hotkeysPanel;
 
     public SettingsTab(
             ServerConnectionPanel serverConnectionPanel,
             ScanOptionsPanel scanOptionsPanel,
-            ProxyModePanel proxyModePanel,
             RequestStatsPanel requestStatsPanel,
-            FilterRulesPanel filterRulesPanel,
             HotkeysPanel hotkeysPanel) {
+        this(serverConnectionPanel, scanOptionsPanel, requestStatsPanel, hotkeysPanel, resolveExtensionVersion());
+    }
+
+    SettingsTab(
+            ServerConnectionPanel serverConnectionPanel,
+            ScanOptionsPanel scanOptionsPanel,
+            RequestStatsPanel requestStatsPanel,
+            HotkeysPanel hotkeysPanel,
+            String extensionVersion) {
         super(new BorderLayout());
         this.serverConnectionPanel = serverConnectionPanel;
         this.scanOptionsPanel = scanOptionsPanel;
-        this.proxyModePanel = proxyModePanel;
         this.requestStatsPanel = requestStatsPanel;
-        this.filterRulesPanel = filterRulesPanel;
         this.hotkeysPanel = hotkeysPanel;
 
-        JPanel content = new JPanel();
-        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
-        content.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        ScrollablePanel content = new ScrollablePanel(new GridBagLayout());
+        content.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
 
-        content.add(createDocsBanner());
-        content.add(Box.createVerticalStrut(10));
-        content.add(serverConnectionPanel);
-        content.add(Box.createVerticalStrut(12));
-        content.add(scanOptionsPanel);
-        content.add(Box.createVerticalStrut(12));
-        content.add(hotkeysPanel);
-        content.add(Box.createVerticalStrut(12));
-        content.add(proxyModePanel);
-        content.add(Box.createVerticalStrut(12));
-        content.add(requestStatsPanel);
-        content.add(Box.createVerticalStrut(12));
-        content.add(filterRulesPanel);
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.weightx = 1;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.anchor = GridBagConstraints.NORTH;
+        gbc.insets = new Insets(0, 0, 16, 0);
+        content.add(createOverview(extensionVersion), gbc);
+
+        gbc.gridy++;
+        gbc.insets = new Insets(0, 0, 14, 0);
+        content.add(createCard(serverConnectionPanel, "serverConnectionCard"), gbc);
+
+        gbc.gridy++;
+        content.add(createCard(scanOptionsPanel, "scanOptionsCard"), gbc);
+
+        gbc.gridy++;
+        content.add(createCard(hotkeysPanel, "keyboardShortcutsCard"), gbc);
+
+        gbc.gridy++;
+        gbc.insets = new Insets(0, 0, 0, 0);
+        content.add(createCard(requestStatsPanel, "requestStatisticsCard"), gbc);
+
+        gbc.gridy++;
+        gbc.weighty = 1;
+        gbc.fill = GridBagConstraints.BOTH;
+        content.add(new JPanel(), gbc);
 
         JScrollPane scrollPane = new JScrollPane(content);
         scrollPane.getVerticalScrollBar().setUnitIncrement(25);
@@ -62,6 +80,50 @@ public class SettingsTab extends JPanel {
         add(scrollPane, BorderLayout.CENTER);
 
         setName("settingsTab");
+    }
+
+    private JPanel createOverview(String extensionVersion) {
+        JPanel overview = new JPanel(new BorderLayout(0, 8));
+        overview.setBorder(BorderFactory.createEmptyBorder(0, 2, 0, 2));
+        overview.setName("settingsOverview");
+
+        JPanel heading = new JPanel(new BorderLayout(0, 4));
+        JPanel titleRow = new JPanel(new BorderLayout());
+        JLabel title = new JLabel("Vigolium Settings");
+        Font base = UIManager.getFont("defaultFont");
+        if (base != null) title.setFont(base.deriveFont(Font.BOLD, base.getSize() + 6f));
+        titleRow.add(title, BorderLayout.WEST);
+
+        String version = extensionVersion == null || extensionVersion.isBlank() ? "development" : extensionVersion;
+        JLabel versionLabel = new JLabel("Extension v" + version);
+        versionLabel.setName("settingsExtensionVersionLabel");
+        versionLabel.putClientProperty("FlatLaf.styleClass", "small");
+        Color muted = UIManager.getColor("Label.disabledForeground");
+        if (muted != null) versionLabel.setForeground(muted);
+        titleRow.add(versionLabel, BorderLayout.EAST);
+
+        heading.add(titleRow, BorderLayout.NORTH);
+        heading.add(
+                new JLabel("Configure the server connection, scanning defaults, shortcuts, and activity counters."),
+                BorderLayout.CENTER);
+        overview.add(heading, BorderLayout.NORTH);
+        overview.add(createDocsBanner(), BorderLayout.CENTER);
+        return overview;
+    }
+
+    private static JPanel createCard(Component content, String name) {
+        JPanel card = new JPanel(new BorderLayout());
+        card.setName(name);
+        card.setBorder(new CompoundBorder(createCardOutline(), BorderFactory.createEmptyBorder(14, 16, 14, 16)));
+        card.add(content, BorderLayout.CENTER);
+        return card;
+    }
+
+    private static Border createCardOutline() {
+        Color borderColor = UIManager.getColor("Component.borderColor");
+        if (borderColor == null) borderColor = UIManager.getColor("Separator.foreground");
+        if (borderColor == null) borderColor = Color.GRAY;
+        return BorderFactory.createLineBorder(borderColor);
     }
 
     private JPanel createDocsBanner() {
@@ -98,15 +160,17 @@ public class SettingsTab extends JPanel {
         JLabel suffix = new JLabel(" if you have any questions.");
         inner.add(suffix);
 
-        // Wrap in BorderLayout(WEST) so it always sits flush left in the BoxLayout column.
-        // Keep default CENTER_ALIGNMENT so BoxLayout sizes the wrapper to the full container
-        // width (matching the other panels) instead of offsetting it for mixed-alignment layout.
         JPanel banner = new JPanel(new BorderLayout());
         banner.setName("settingsDocsBanner");
         banner.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         banner.add(inner, BorderLayout.WEST);
 
         return banner;
+    }
+
+    private static String resolveExtensionVersion() {
+        String version = SettingsTab.class.getPackage().getImplementationVersion();
+        return version == null || version.isBlank() ? "development" : version;
     }
 
     private static void openDocs() {
@@ -128,11 +192,35 @@ public class SettingsTab extends JPanel {
         return scanOptionsPanel;
     }
 
-    public ProxyModePanel getProxyModePanel() {
-        return proxyModePanel;
-    }
+    private static final class ScrollablePanel extends JPanel implements Scrollable {
+        private ScrollablePanel(GridBagLayout layout) {
+            super(layout);
+        }
 
-    public FilterRulesPanel getFilterRulesPanel() {
-        return filterRulesPanel;
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return 25;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return Math.max(
+                    25, orientation == SwingConstants.VERTICAL ? visibleRect.height - 25 : visibleRect.width - 25);
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
     }
 }

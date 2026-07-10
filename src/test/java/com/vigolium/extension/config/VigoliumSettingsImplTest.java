@@ -95,13 +95,43 @@ class VigoliumSettingsImplTest {
 
     @Test
     void scanHotkey_default() {
-        assertEquals("Ctrl+Alt+R", settings.getScanHotkey());
+        assertEquals("Ctrl+Alt+N", settings.getScanHotkey());
     }
 
     @Test
     void scanHotkey_setAndGet() {
         settings.setScanHotkey("Ctrl+Shift+S");
         assertEquals("Ctrl+Shift+S", settings.getScanHotkey());
+    }
+
+    @Test
+    void snapshotAndBridge_defaults() {
+        assertEquals("Ctrl+Alt+S", settings.getSnapshotSitemapHotkey());
+        assertFalse(settings.isSnapshotAutoEnabled());
+        assertEquals(5, settings.getSnapshotIntervalMinutes());
+        assertTrue(settings.isSnapshotInScopeOnly());
+        assertFalse(settings.isBridgeEnabled());
+        assertEquals("http://127.0.0.1:9009", settings.getBridgeListenUrl());
+        assertFalse(settings.isBridgeInScopeOnly());
+    }
+
+    @Test
+    void snapshotAndBridge_roundTrip() {
+        settings.setSnapshotSitemapHotkey("Ctrl+Shift+M");
+        settings.setSnapshotAutoEnabled(true);
+        settings.setSnapshotIntervalMinutes(10);
+        settings.setSnapshotInScopeOnly(false);
+        settings.setBridgeEnabled(true);
+        settings.setBridgeListenUrl("http://localhost:9010/");
+        settings.setBridgeInScopeOnly(false);
+
+        assertEquals("Ctrl+Shift+M", settings.getSnapshotSitemapHotkey());
+        assertTrue(settings.isSnapshotAutoEnabled());
+        assertEquals(10, settings.getSnapshotIntervalMinutes());
+        assertFalse(settings.isSnapshotInScopeOnly());
+        assertTrue(settings.isBridgeEnabled());
+        assertEquals("http://localhost:9010/", settings.getBridgeListenUrl());
+        assertFalse(settings.isBridgeInScopeOnly());
     }
 
     @Test

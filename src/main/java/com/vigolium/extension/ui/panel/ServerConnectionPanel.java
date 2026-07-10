@@ -17,12 +17,11 @@ public class ServerConnectionPanel extends JPanel {
     private int loadingFrame;
 
     public ServerConnectionPanel() {
-        super(new BorderLayout(0, 3));
+        super(new BorderLayout(0, 12));
         setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         setName("serverConnectionPanel");
 
-        // Header
-        JPanel headerPanel = new JPanel(new BorderLayout());
+        JPanel headerPanel = new JPanel(new BorderLayout(0, 4));
         JLabel titleLabel = new JLabel("Server Connection");
         Font base = UIManager.getFont("defaultFont");
         if (base != null) {
@@ -31,46 +30,57 @@ public class ServerConnectionPanel extends JPanel {
         headerPanel.add(titleLabel, BorderLayout.NORTH);
 
         JLabel descLabel = new JLabel("Configure the Vigolium API server endpoint and authentication.");
-        descLabel.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
         headerPanel.add(descLabel, BorderLayout.SOUTH);
 
-        // Form: Server URL on row 0, API Key on row 2, Test Connection + Status on row 4
-        JPanel formPanel = new JPanel();
-        GridBagLayout layout = new GridBagLayout();
-        layout.columnWidths = new int[] {0, 5, 0, 10, 0, 0};
-        layout.rowHeights = new int[] {0, 3, 0, 5, 0};
-        formPanel.setLayout(layout);
+        JPanel formPanel = new JPanel(new GridBagLayout());
 
-        GridBagConstraints gbc = new GridBagConstraints();
-
-        // Row 0: Server URL label + field
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        gbc.anchor = GridBagConstraints.LINE_START;
-        formPanel.add(new JLabel("Server URL:"), gbc);
-
-        serverUrlField = new JTextField(40);
-        serverUrlField.setName("serverConnectionServerUrlField");
-        gbc.gridx = 2;
-        gbc.anchor = GridBagConstraints.ABOVE_BASELINE;
-        formPanel.add(serverUrlField, gbc);
-
-        // Row 2: API Key label + field
-        gbc.gridx = 0;
-        gbc.gridy = 2;
-        gbc.anchor = GridBagConstraints.LINE_START;
-        formPanel.add(new JLabel("API Key:"), gbc);
-
-        apiKeyField = new JPasswordField(40);
-        apiKeyField.setName("serverConnectionApiKeyField");
-        gbc.gridx = 2;
-        gbc.anchor = GridBagConstraints.ABOVE_BASELINE;
-        formPanel.add(apiKeyField, gbc);
-
-        // Row 4: Test Connection (under labels) + Status
         testConnectionButton = new JButton("Test Connection");
         testConnectionButton.setName("serverConnectionTestButton");
         testConnectionButton.putClientProperty("FlatLaf.styleClass", "primary");
+        testConnectionButton.setEnabled(false);
+        GridBagConstraints buttonConstraints = new GridBagConstraints();
+        buttonConstraints.gridx = 0;
+        buttonConstraints.gridy = 0;
+        buttonConstraints.anchor = GridBagConstraints.LINE_START;
+        buttonConstraints.insets = new Insets(0, 0, 0, 12);
+        formPanel.add(testConnectionButton, buttonConstraints);
+
+        GridBagConstraints labelConstraints = new GridBagConstraints();
+        labelConstraints.gridx = 1;
+        labelConstraints.gridy = 0;
+        labelConstraints.anchor = GridBagConstraints.LINE_END;
+        labelConstraints.insets = new Insets(0, 0, 0, 8);
+        formPanel.add(new JLabel("Server URL:"), labelConstraints);
+
+        serverUrlField = new JTextField(28);
+        serverUrlField.setName("serverConnectionServerUrlField");
+        serverUrlField.setToolTipText("Vigolium API server URL");
+        serverUrlField.putClientProperty("JTextField.placeholderText", "http://127.0.0.1:9002");
+        GridBagConstraints serverConstraints = new GridBagConstraints();
+        serverConstraints.gridx = 2;
+        serverConstraints.gridy = 0;
+        serverConstraints.weightx = 0.6;
+        serverConstraints.fill = GridBagConstraints.HORIZONTAL;
+        formPanel.add(serverUrlField, serverConstraints);
+
+        GridBagConstraints apiLabelConstraints = new GridBagConstraints();
+        apiLabelConstraints.gridx = 3;
+        apiLabelConstraints.gridy = 0;
+        apiLabelConstraints.anchor = GridBagConstraints.LINE_END;
+        apiLabelConstraints.insets = new Insets(0, 18, 0, 8);
+        formPanel.add(new JLabel("API Key:"), apiLabelConstraints);
+
+        apiKeyField = new JPasswordField(22);
+        apiKeyField.setName("serverConnectionApiKeyField");
+        apiKeyField.setToolTipText("API key used to authenticate with the Vigolium server");
+        apiKeyField.putClientProperty("JTextField.placeholderText", "Enter API key");
+        GridBagConstraints apiConstraints = new GridBagConstraints();
+        apiConstraints.gridx = 4;
+        apiConstraints.gridy = 0;
+        apiConstraints.weightx = 0.4;
+        apiConstraints.fill = GridBagConstraints.HORIZONTAL;
+        formPanel.add(apiKeyField, apiConstraints);
+
         testConnectionButton.setEnabled(!serverUrlField.getText().trim().isEmpty());
         serverUrlField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             private void update() {
@@ -92,25 +102,20 @@ public class ServerConnectionPanel extends JPanel {
                 update();
             }
         });
-        gbc.gridx = 0;
-        gbc.gridy = 4;
-        gbc.anchor = GridBagConstraints.LINE_START;
-        formPanel.add(testConnectionButton, gbc);
 
-        statusLabel = new JLabel(" ");
+        statusLabel = new JLabel("Status: Not tested");
         statusLabel.setName("serverConnectionStatusLabel");
-        gbc.gridx = 2;
-        gbc.anchor = GridBagConstraints.LINE_START;
-        formPanel.add(statusLabel, gbc);
-
-        // Filler — pushes everything left
-        gbc = new GridBagConstraints();
-        gbc.gridx = 5;
-        gbc.gridy = 0;
-        gbc.weightx = 1.0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        formPanel.add(
-                new Box.Filler(new Dimension(0, 0), new Dimension(0, 0), new Dimension(0, Integer.MAX_VALUE)), gbc);
+        Color muted = UIManager.getColor("Label.disabledForeground");
+        if (muted != null) statusLabel.setForeground(muted);
+        GridBagConstraints statusConstraints = new GridBagConstraints();
+        statusConstraints.gridx = 2;
+        statusConstraints.gridy = 1;
+        statusConstraints.gridwidth = 3;
+        statusConstraints.weightx = 1.0;
+        statusConstraints.fill = GridBagConstraints.HORIZONTAL;
+        statusConstraints.anchor = GridBagConstraints.LINE_START;
+        statusConstraints.insets = new Insets(8, 0, 0, 0);
+        formPanel.add(statusLabel, statusConstraints);
 
         add(headerPanel, BorderLayout.NORTH);
         add(formPanel, BorderLayout.CENTER);
@@ -157,6 +162,9 @@ public class ServerConnectionPanel extends JPanel {
             loadingFrame = 0;
             testConnectionButton.setText(LOADING_FRAMES[0]);
             testConnectionButton.setEnabled(false);
+            Color color = UIManager.getColor("Label.foreground");
+            if (color != null) statusLabel.setForeground(color);
+            statusLabel.setText("Status: Testing connection…");
             loadingTimer.start();
         } else {
             loadingTimer.stop();

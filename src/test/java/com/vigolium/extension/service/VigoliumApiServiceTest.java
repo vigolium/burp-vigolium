@@ -104,6 +104,27 @@ class VigoliumApiServiceTest {
     }
 
     @Test
+    void siteMapSnapshot_callsBatchEndpointAndParsesCounts() throws Exception {
+        server.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"received\":1,\"inserted\":1,\"updated\":0,\"unchanged\":0,\"skipped\":0}"));
+
+        SnapshotChunkResponse response = service.snapshotSiteMap(new SiteMapSnapshotRequest(
+                "snapshot-1",
+                0,
+                true,
+                "2026-01-01T00:00:00Z",
+                java.util.List.of(new SiteMapSnapshotRecord(
+                        "https://example.com", "cmVxdWVzdA==", "cmVzcG9uc2U=", "identity", "hash"))));
+
+        RecordedRequest request = server.takeRequest();
+        assertEquals("POST", request.getMethod());
+        assertEquals("/api/burp/sitemap/snapshot", request.getPath());
+        assertEquals(1, response.inserted());
+    }
+
+    @Test
     void ingest_sendsBearerToken() throws Exception {
         server.enqueue(new MockResponse().setResponseCode(200));
 

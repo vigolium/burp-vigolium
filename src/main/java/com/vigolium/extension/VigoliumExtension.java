@@ -19,9 +19,11 @@ import com.vigolium.extension.controller.SettingsController;
 import com.vigolium.extension.filter.FilterEngine;
 import com.vigolium.extension.filter.FilterRule;
 import com.vigolium.extension.model.Finding;
+import com.vigolium.extension.service.BurpBridgeService;
 import com.vigolium.extension.service.LogService;
 import com.vigolium.extension.service.RequestCounters;
 import com.vigolium.extension.service.RequestDispatchService;
+import com.vigolium.extension.service.SiteMapSnapshotService;
 import com.vigolium.extension.service.VigoliumApiService;
 import com.vigolium.extension.ui.dialog.FilterRuleEditDialog;
 import com.vigolium.extension.ui.panel.*;
@@ -37,9 +39,6 @@ import javax.swing.event.DocumentListener;
 
 public class VigoliumExtension implements BurpExtension {
 
-    // Keep in sync with the `version` in build.gradle.kts
-    private static final String VERSION = "0.1.1";
-
     private MontoyaApi montoyaApi;
     private FindingsController findingsController;
     private HttpRecordsController httpRecordsController;
@@ -49,17 +48,22 @@ public class VigoliumExtension implements BurpExtension {
     private ProxyController proxyController;
     private HotkeyController hotkeyController;
     private RequestDispatchService dispatcher;
+    private SiteMapSnapshotService snapshotService;
+    private BurpBridgeService bridgeService;
 
     @Override
     public void initialize(MontoyaApi api) {
         this.montoyaApi = api;
-        api.extension().setName("Vigolium v" + VERSION);
+        api.extension().setName("Vigolium");
+        String extensionVersion = resolveExtensionVersion();
 
         // Services
         VigoliumSettings settings = new VigoliumSettingsImpl(api.persistence().preferences());
         LogService logService = new LogService();
         VigoliumApiService apiService = new VigoliumApiService(settings::getServerUrl, settings::getApiKey);
         FilterEngine filterEngine = new FilterEngine();
+        snapshotService = new SiteMapSnapshotService(api, settings, apiService, logService);
+        bridgeService = new BurpBridgeService(api, settings, logService);
 
         // UI Panels
         ServerConnectionPanel serverConnectionPanel = new ServerConnectionPanel();
@@ -225,13 +229,17 @@ public class VigoliumExtension implements BurpExtension {
         proxyController = new ProxyController(settings, settings, filterEngine, apiService, logService, ingestCounters);
 
         // Hotkey Controller
-        hotkeyController = new HotkeyController(api, settings, dispatcher);
+        hotkeyController = new HotkeyController(api, settings, dispatcher, () -> snapshotService.snapshotNow("Hotkey"));
 
         // Hotkeys Panel
         HotkeysPanel hotkeysPanel = new HotkeysPanel(hotkeyController);
         hotkeysPanel.setIngestHotkey(settings.getIngestHotkey());
         hotkeysPanel.setScanHotkey(settings.getScanHotkey());
         hotkeysPanel.setAgentScanHotkey(settings.getAgentScanHotkey());
+        hotkeysPanel.setSnapshotSitemapHotkey(settings.getSnapshotSitemapHotkey());
+
+        SiteMapSnapshotPanel siteMapSnapshotPanel = new SiteMapSnapshotPanel(settings, snapshotService);
+        BridgePanel bridgePanel = new BridgePanel(settings, bridgeService);
 
         // Tabs
         FindingsTab findingsTab = new FindingsTab(api);
@@ -239,15 +247,12 @@ public class VigoliumExtension implements BurpExtension {
         ScansTab scansTab = new ScansTab();
         AgentSessionsTab agentSessionsTab = new AgentSessionsTab();
         ScansContainerTab scansContainerTab = new ScansContainerTab(scansTab, agentSessionsTab);
-        SettingsTab settingsTab = new SettingsTab(
-                serverConnectionPanel,
-                scanOptionsPanel,
-                proxyModePanel,
-                requestStatsPanel,
-                proxyFilterRulesPanel,
-                hotkeysPanel);
+        BridgeTab bridgeTab = new BridgeTab(siteMapSnapshotPanel, bridgePanel, proxyModePanel, proxyFilterRulesPanel);
+        SettingsTab settingsTab =
+                new SettingsTab(serverConnectionPanel, scanOptionsPanel, requestStatsPanel, hotkeysPanel);
         LogsTab logsTab = new LogsTab(logService);
-        VigoliumTab mainTab = new VigoliumTab(findingsTab, httpRecordsTab, scansContainerTab, settingsTab, logsTab);
+        VigoliumTab mainTab =
+                new VigoliumTab(findingsTab, httpRecordsTab, scansContainerTab, bridgeTab, settingsTab, logsTab);
 
         wireFindings(findingsTab, mainTab, apiService, logService);
         wireHttpRecords(httpRecordsTab, apiService, logService, settings);
@@ -265,6 +270,8 @@ public class VigoliumExtension implements BurpExtension {
 
         // Register hotkeys
         hotkeyController.register();
+        snapshotService.start();
+        bridgeService.start();
 
         // Extension unload handler
         api.extension().registerUnloadingHandler(() -> {
@@ -275,10 +282,19 @@ public class VigoliumExtension implements BurpExtension {
             settingsController.shutdown();
             proxyController.shutdown();
             hotkeyController.shutdown();
+            snapshotService.shutdown();
+            bridgeService.shutdown();
             dispatcher.shutdown();
         });
 
-        logService.addLog(LogService.Level.INFO, "Vigolium extension loaded");
+        String loadedMessage = "[Vigolium] Extension v" + extensionVersion + " loaded successfully.";
+        api.logging().logToOutput(loadedMessage);
+        logService.addLog(LogService.Level.INFO, loadedMessage);
+    }
+
+    private static String resolveExtensionVersion() {
+        String version = VigoliumExtension.class.getPackage().getImplementationVersion();
+        return version == null || version.isBlank() ? "development" : version;
     }
 
     private void wireFindings(
@@ -600,7 +616,7 @@ public class VigoliumExtension implements BurpExtension {
             Toolkit.getDefaultToolkit()
                     .getSystemClipboard()
                     .setContents(new java.awt.datatransfer.StringSelection(sb.toString()), null);
-            logService.addLog(LogService.Level.INFO, "[Findings] Finding details copied to clipboard");
+            logService.addLog(LogService.Level.INFO, "[Findings] Finding copied to clipboard as Markdown");
         } catch (Exception ex) {
             logService.addLog(LogService.Level.WARN, "[Findings] Clipboard copy failed: " + ex.getMessage());
         }

@@ -63,6 +63,7 @@ public class AgentSessionsTab extends JPanel {
         table.setPreferredScrollableViewportSize(
                 new Dimension(table.getPreferredScrollableViewportSize().width, table.getRowHeight() * 10));
         table.setAutoResizeMode(JTable.AUTO_RESIZE_SUBSEQUENT_COLUMNS);
+        RecordToolbarStyle.styleTable(table);
 
         List<ColumnDef<AgentSession>> colDefs = AgentSessionsColumnDefs.create();
         for (int i = 0; i < colDefs.size() && i < table.getColumnCount(); i++) {
@@ -99,22 +100,25 @@ public class AgentSessionsTab extends JPanel {
         pageSizeCombo.setName("agentSessionsPageSizeCombo");
         pageSizeCombo.setSelectedItem("50");
 
-        JPanel toolbarLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        JPanel toolbarLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, RecordToolbarStyle.CONTROL_GAP, 0));
+        toolbarLeft.setName("agentSessionsPrimaryControls");
+        toolbarLeft.add(refreshBtn);
+        toolbarLeft.add(RecordToolbarStyle.separator());
         toolbarLeft.add(new JLabel("Mode:"));
         toolbarLeft.add(modeCombo);
-        toolbarLeft.add(refreshBtn);
         toolbarLeft.add(autoRefreshCheck);
 
-        JPanel toolbarRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-        toolbarRight.add(prevBtn);
+        JPanel toolbarRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, RecordToolbarStyle.CONTROL_GAP, 0));
         toolbarRight.add(pageInfoLabel);
+        toolbarRight.add(prevBtn);
         toolbarRight.add(nextBtn);
-        toolbarRight.add(new JLabel("Per page:"));
+        toolbarRight.add(RecordToolbarStyle.separator());
+        toolbarRight.add(new JLabel("Rows:"));
         toolbarRight.add(pageSizeCombo);
 
-        JPanel toolbar = new JPanel(new BorderLayout());
+        JPanel toolbar = new JPanel(new BorderLayout(12, 0));
         toolbar.setName("agentSessionsToolbar");
-        toolbar.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
+        toolbar.setBorder(RecordToolbarStyle.toolbarBorder());
         toolbar.add(toolbarLeft, BorderLayout.WEST);
         toolbar.add(toolbarRight, BorderLayout.EAST);
 
@@ -133,10 +137,10 @@ public class AgentSessionsTab extends JPanel {
         logAutoScrollCheck = new JCheckBox("Auto-scroll", true);
         logAutoScrollCheck.setName("agentSessionsLogAutoScrollCheck");
 
-        JPanel logBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
-        logBar.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
-        logBar.add(new JLabel("Agent Log:"));
+        JPanel logBar = new JPanel(new FlowLayout(FlowLayout.LEFT, RecordToolbarStyle.CONTROL_GAP, 0));
+        logBar.setBorder(BorderFactory.createEmptyBorder(6, 12, 8, 12));
         logBar.add(logRefreshBtn);
+        logBar.add(RecordToolbarStyle.separator());
         logBar.add(logAutoScrollCheck);
 
         logArea = new JTextArea();
@@ -153,8 +157,8 @@ public class AgentSessionsTab extends JPanel {
         JPanel logsPanel = new JPanel(new BorderLayout());
         logsPanel.setName("agentSessionsLogsPanel");
         JLabel logsHeader = new JLabel("Agent Session Log");
-        logsHeader.setFont(UIManager.getFont("defaultFont").deriveFont(Font.BOLD));
-        logsHeader.setBorder(BorderFactory.createEmptyBorder(5, 10, 0, 10));
+        RecordToolbarStyle.makeBold(logsHeader);
+        logsHeader.setBorder(BorderFactory.createEmptyBorder(8, 12, 0, 12));
         logsPanel.add(logsHeader, BorderLayout.NORTH);
 
         JPanel logInner = new JPanel(new BorderLayout());
@@ -169,6 +173,7 @@ public class AgentSessionsTab extends JPanel {
         splitPane.setDividerSize(5);
 
         add(splitPane, BorderLayout.CENTER);
+        RefreshShortcut.install(this, refreshBtn);
 
         table.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {

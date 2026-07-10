@@ -183,6 +183,68 @@ class FindingsControllerTest {
     }
 
     @Test
+    void sortPage_supportsEveryFindingsDataField() {
+        Finding first = createFinding(
+                1,
+                Severity.CRITICAL,
+                "A description",
+                "https://a.example/",
+                "A module",
+                "certain",
+                "2026-01-01T00:00:00Z");
+        Finding second = createFinding(
+                2, Severity.LOW, "B description", "https://b.example/", "B module", "firm", "2026-02-01T00:00:00Z");
+        List<String> fields = List.of("severity", "module_name", "description", "confidence", "matched_at", "found_at");
+
+        for (String field : fields) {
+            assertEquals(
+                    1,
+                    FindingsController.sortPage(List.of(second, first), field, "asc")
+                            .get(0)
+                            .id(),
+                    field);
+            assertEquals(
+                    2,
+                    FindingsController.sortPage(List.of(first, second), field, "desc")
+                            .get(0)
+                            .id(),
+                    field);
+        }
+    }
+
+    @Test
+    void clientOnlySortsCompleteFilteredResultBeforePagination() throws Exception {
+        Finding zulu =
+                createFinding(1, Severity.HIGH, "Zulu", "https://z.example/", "Module", "firm", "2026-03-01T00:00:00Z");
+        Finding yankee = createFinding(
+                2, Severity.HIGH, "Yankee", "https://y.example/", "Module", "firm", "2026-02-01T00:00:00Z");
+        Finding alpha = createFinding(
+                3, Severity.HIGH, "Alpha", "https://a.example/", "Module", "firm", "2026-01-01T00:00:00Z");
+        when(apiService.findings(any(FindingsQuery.class))).thenAnswer(invocation -> {
+            FindingsQuery requested = invocation.getArgument(0);
+            return requested.getOffset() == 0
+                    ? new FindingsResponse(List.of(zulu, yankee), 3, 2, 0, true)
+                    : new FindingsResponse(List.of(alpha), 3, 2, 2, false);
+        });
+        controller.getQuery().setLimit(2);
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<FindingsResponse> loaded = new AtomicReference<>();
+        controller.setOnPageLoaded(response -> {
+            loaded.set(response);
+            latch.countDown();
+        });
+
+        controller.setSort("description", "asc");
+
+        assertTrue(latch.await(3, TimeUnit.SECONDS));
+        assertEquals(3, tableModel.getRow(0).id());
+        assertEquals(2, tableModel.getRow(1).id());
+        assertEquals(3, loaded.get().total());
+        assertTrue(loaded.get().hasMore());
+        verify(apiService, times(2)).findings(any(FindingsQuery.class));
+    }
+
+    @Test
     void fetchCurrentPage_handlesApiError() throws Exception {
         when(apiService.findings(any(FindingsQuery.class))).thenThrow(new RuntimeException("connection refused"));
 
@@ -229,18 +291,36 @@ class FindingsControllerTest {
     }
 
     private Finding createFinding(int id, Severity severity) {
+        return createFinding(
+                id,
+                severity,
+                "SQL Injection found",
+                "https://example.com/api",
+                "SQL Injection Scanner",
+                "firm",
+                "2026-02-16T10:00:00Z");
+    }
+
+    private Finding createFinding(
+            int id,
+            Severity severity,
+            String description,
+            String matchedAt,
+            String moduleName,
+            String confidence,
+            String foundAt) {
         return new Finding(
                 id,
                 List.of(),
                 "",
                 "sqli",
-                "SQL Injection Scanner",
-                "SQL Injection found",
+                moduleName,
+                description,
                 severity,
-                "firm",
+                confidence,
                 List.of(),
-                List.of("https://example.com/api"),
-                "2026-02-16T10:00:00Z",
+                List.of(matchedAt),
+                foundAt,
                 "",
                 "");
     }

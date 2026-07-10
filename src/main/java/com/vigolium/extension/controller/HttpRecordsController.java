@@ -8,13 +8,21 @@ import com.vigolium.extension.service.LogService;
 import com.vigolium.extension.service.VigoliumApiService;
 import com.vigolium.extension.ui.table.HttpRecordsTableModel;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import javax.swing.SwingUtilities;
 
 public class HttpRecordsController {
+
+    private static final Comparator<String> TEXT_ASC = Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER);
+    private static final Set<String> CLIENT_SORT_FIELDS =
+            Set.of("hostname", "response_content_length", "risk_score", "source");
+    private static final int CLIENT_SORT_BATCH_SIZE = 500;
 
     private final VigoliumApiService apiService;
     private final LogService logService;
@@ -55,10 +63,13 @@ public class HttpRecordsController {
     }
 
     public void fetchCurrentPage() {
+        HttpRecordsQuery requestQuery = query.copy();
         executor.submit(() -> {
             try {
                 if (!apiService.isConfigured()) return;
-                HttpRecordsResponse response = apiService.httpRecords(query);
+                HttpRecordsResponse response = CLIENT_SORT_FIELDS.contains(requestQuery.getSort())
+                        ? fetchClientSortedPage(requestQuery)
+                        : apiService.httpRecords(requestQuery);
                 SwingUtilities.invokeLater(() -> {
                     tableModel.setOffset(response.offset());
                     tableModel.setRows(response.data());
@@ -70,6 +81,35 @@ public class HttpRecordsController {
                 logService.addLog(LogService.Level.WARN, "[HTTP Records] Fetch failed: " + e.getMessage());
             }
         });
+    }
+
+    private HttpRecordsResponse fetchClientSortedPage(HttpRecordsQuery requestQuery) {
+        HttpRecordsQuery batchQuery = requestQuery.copy();
+        batchQuery.setLimit(CLIENT_SORT_BATCH_SIZE);
+        batchQuery.setOffset(0);
+        batchQuery.setSort("created_at");
+        batchQuery.setOrder("desc");
+
+        LinkedHashMap<String, HttpRecord> all = new LinkedHashMap<>();
+        while (true) {
+            HttpRecordsResponse batch = apiService.httpRecords(batchQuery);
+            for (HttpRecord record : batch.data()) all.put(record.uuid(), record);
+            if (!batch.hasMore() || batch.data().isEmpty()) break;
+            int nextOffset = batchQuery.getOffset() + batch.data().size();
+            if (nextOffset <= batchQuery.getOffset()) break;
+            batchQuery.setOffset(nextOffset);
+        }
+
+        List<HttpRecord> sorted =
+                sortPage(new ArrayList<>(all.values()), requestQuery.getSort(), requestQuery.getOrder());
+        int from = Math.min(requestQuery.getOffset(), sorted.size());
+        int to = requestQuery.getLimit() == 0 ? sorted.size() : Math.min(sorted.size(), from + requestQuery.getLimit());
+        return new HttpRecordsResponse(
+                new ArrayList<>(sorted.subList(from, to)),
+                sorted.size(),
+                requestQuery.getLimit(),
+                from,
+                to < sorted.size());
     }
 
     public void fetchDetail(HttpRecord summary) {
@@ -188,6 +228,30 @@ public class HttpRecordsController {
 
     public void refresh() {
         fetchCurrentPage();
+    }
+
+    /** Sorts a complete filtered result before the caller applies pagination. */
+    static List<HttpRecord> sortPage(List<HttpRecord> data, String sortField, String sortOrder) {
+        Comparator<HttpRecord> comparator =
+                switch (sortField) {
+                    case "uuid" -> Comparator.comparing(HttpRecord::uuid, TEXT_ASC);
+                    case "method" -> Comparator.comparing(HttpRecord::method, TEXT_ASC);
+                    case "status_code" -> Comparator.comparingInt(HttpRecord::statusCode);
+                    case "hostname" -> Comparator.comparing(HttpRecord::hostname, TEXT_ASC);
+                    case "path" -> Comparator.comparing(HttpRecord::path, TEXT_ASC);
+                    case "response_content_length" -> Comparator.comparingInt(HttpRecord::responseContentLength);
+                    case "response_time" -> Comparator.comparingInt(HttpRecord::responseTimeMs);
+                    case "risk_score" -> Comparator.comparingInt(HttpRecord::riskScore);
+                    case "source" -> Comparator.comparing(HttpRecord::source, TEXT_ASC);
+                    case "sent_at" -> Comparator.comparing(HttpRecord::sentAt, TEXT_ASC);
+                    case "created_at" -> Comparator.comparing(HttpRecord::createdAt, TEXT_ASC);
+                    default -> null;
+                };
+        if (comparator == null) return data;
+        List<HttpRecord> sorted = new ArrayList<>(data);
+        if ("desc".equals(sortOrder)) comparator = comparator.reversed();
+        sorted.sort(comparator.thenComparing(HttpRecord::uuid, TEXT_ASC));
+        return sorted;
     }
 
     public void shutdown() {

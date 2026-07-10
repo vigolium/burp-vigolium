@@ -6,7 +6,6 @@ import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
 import com.vigolium.extension.service.RequestDispatchService;
 import java.awt.Component;
 import java.util.List;
-import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 
 public class ContextMenuController implements ContextMenuItemsProvider {
@@ -26,9 +25,6 @@ public class ContextMenuController implements ContextMenuItemsProvider {
             return List.of();
         }
 
-        JMenu menu = new JMenu("Vigolium");
-        menu.setName("vigoliumMenu");
-
         JMenuItem ingestItem = new JMenuItem("Send to Ingestion");
         ingestItem.setName("sendToIngestionMenuItem");
         ingestItem.addActionListener(e -> dispatcher.sendToIngestion(items, "CtxMenu"));
@@ -41,10 +37,6 @@ public class ContextMenuController implements ContextMenuItemsProvider {
         agentScanItem.setName("sendToAgentScanMenuItem");
         agentScanItem.addActionListener(e -> dispatcher.sendToAgentScan(items, "CtxMenu"));
 
-        menu.add(ingestItem);
-        menu.add(scanItem);
-        menu.add(agentScanItem);
-
-        return List.of(menu);
+        return List.of(ingestItem, scanItem, agentScanItem);
     }
 }

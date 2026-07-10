@@ -16,6 +16,24 @@ public class HttpRecordsQuery {
     private String sort = "created_at";
     private String order = "desc";
 
+    public HttpRecordsQuery copy() {
+        HttpRecordsQuery copy = new HttpRecordsQuery();
+        copy.limit = limit;
+        copy.offset = offset;
+        copy.domain = domain;
+        copy.method = method;
+        copy.path = path;
+        copy.statusCode = statusCode;
+        copy.contentType = contentType;
+        copy.search = search;
+        copy.source = source;
+        copy.minRisk = minRisk;
+        copy.remark = remark;
+        copy.sort = sort;
+        copy.order = order;
+        return copy;
+    }
+
     public int getLimit() {
         return limit;
     }

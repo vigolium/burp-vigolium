@@ -23,7 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import javax.swing.JMenu;
+import javax.swing.JMenuItem;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -55,22 +55,18 @@ class ContextMenuControllerTest {
     // --- Menu structure ---
 
     @Test
-    void provideMenuItems_withSelectedRequests_returnsSubmenu() {
+    void provideMenuItems_withSelectedRequests_returnsDirectActions() {
         ContextMenuEvent event = mock(ContextMenuEvent.class);
         HttpRequestResponse rr = createMockRequestResponse("GET", "/api", "example.com");
         when(event.selectedRequestResponses()).thenReturn(List.of(rr));
 
         List<Component> items = controller.provideMenuItems(event);
 
-        assertEquals(1, items.size());
-        assertInstanceOf(JMenu.class, items.get(0));
-        JMenu menu = (JMenu) items.get(0);
-        assertEquals("Vigolium", menu.getText());
-        assertEquals("vigoliumMenu", menu.getName());
-        assertEquals(3, menu.getItemCount());
-        assertEquals("Send to Ingestion", menu.getItem(0).getText());
-        assertEquals("Send to Native Scan", menu.getItem(1).getText());
-        assertEquals("Send to Agentic Scan", menu.getItem(2).getText());
+        assertEquals(3, items.size());
+        assertInstanceOf(JMenuItem.class, items.get(0));
+        assertEquals("Send to Ingestion", ((JMenuItem) items.get(0)).getText());
+        assertEquals("Send to Native Scan", ((JMenuItem) items.get(1)).getText());
+        assertEquals("Send to Agentic Scan", ((JMenuItem) items.get(2)).getText());
     }
 
     @Test
@@ -98,10 +94,9 @@ class ContextMenuControllerTest {
         when(event.selectedRequestResponses()).thenReturn(List.of(rr));
 
         List<Component> items = controller.provideMenuItems(event);
-        JMenu menu = (JMenu) items.get(0);
-        assertEquals("sendToIngestionMenuItem", menu.getItem(0).getName());
-        assertEquals("sendToScanMenuItem", menu.getItem(1).getName());
-        assertEquals("sendToAgentScanMenuItem", menu.getItem(2).getName());
+        assertEquals("sendToIngestionMenuItem", items.get(0).getName());
+        assertEquals("sendToScanMenuItem", items.get(1).getName());
+        assertEquals("sendToAgentScanMenuItem", items.get(2).getName());
     }
 
     // --- sendToIngestion via dispatcher ---

@@ -15,6 +15,23 @@ public class FindingsQuery {
     private String sort = "found_at";
     private String order = "desc";
 
+    public FindingsQuery copy() {
+        FindingsQuery copy = new FindingsQuery();
+        copy.limit = limit;
+        copy.offset = offset;
+        copy.domain = domain;
+        copy.severity = severity;
+        copy.moduleName = moduleName;
+        copy.moduleType = moduleType;
+        copy.findingSource = findingSource;
+        copy.scanId = scanId;
+        copy.repoName = repoName;
+        copy.search = search;
+        copy.sort = sort;
+        copy.order = order;
+        return copy;
+    }
+
     public int getLimit() {
         return limit;
     }

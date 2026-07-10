@@ -4,7 +4,7 @@ plugins {
     id("com.diffplug.spotless") version "7.0.2"
 }
 
-version = "0.1.1"
+version = "0.2.0"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_21
@@ -19,6 +19,7 @@ dependencies {
     compileOnly("net.portswigger.burp.extensions:montoya-api:2026.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.11.0")
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
     testImplementation("org.mockito:mockito-core:5.14.2")
@@ -43,6 +44,12 @@ tasks.test {
 // Keep jar filenames stable (no version suffix) so the distributed `burp-vigolium.jar` name holds
 tasks.withType<Jar> {
     archiveVersion.set("")
+    manifest {
+        attributes(
+            "Implementation-Title" to "Vigolium Burp Extension",
+            "Implementation-Version" to project.version,
+        )
+    }
 }
 
 tasks.shadowJar {

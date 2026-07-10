@@ -76,6 +76,7 @@ public class ScansTab extends JPanel {
         table.setPreferredScrollableViewportSize(
                 new Dimension(table.getPreferredScrollableViewportSize().width, table.getRowHeight() * 10));
         table.setAutoResizeMode(JTable.AUTO_RESIZE_SUBSEQUENT_COLUMNS);
+        RecordToolbarStyle.styleTable(table);
 
         List<ColumnDef<Scan>> colDefs = ScansColumnDefs.create();
         for (int i = 0; i < colDefs.size() && i < table.getColumnCount(); i++) {
@@ -109,20 +110,23 @@ public class ScansTab extends JPanel {
         pageSizeCombo.setName("scansPageSizeCombo");
         pageSizeCombo.setSelectedItem("50");
 
-        JPanel toolbarLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        JPanel toolbarLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, RecordToolbarStyle.CONTROL_GAP, 0));
+        toolbarLeft.setName("scansPrimaryControls");
         toolbarLeft.add(refreshBtn);
+        toolbarLeft.add(RecordToolbarStyle.separator());
         toolbarLeft.add(autoRefreshCheck);
 
-        JPanel toolbarRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-        toolbarRight.add(prevBtn);
+        JPanel toolbarRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, RecordToolbarStyle.CONTROL_GAP, 0));
         toolbarRight.add(pageInfoLabel);
+        toolbarRight.add(prevBtn);
         toolbarRight.add(nextBtn);
-        toolbarRight.add(new JLabel("Per page:"));
+        toolbarRight.add(RecordToolbarStyle.separator());
+        toolbarRight.add(new JLabel("Rows:"));
         toolbarRight.add(pageSizeCombo);
 
-        JPanel toolbar = new JPanel(new BorderLayout());
+        JPanel toolbar = new JPanel(new BorderLayout(12, 0));
         toolbar.setName("scansToolbar");
-        toolbar.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
+        toolbar.setBorder(RecordToolbarStyle.toolbarBorder());
         toolbar.add(toolbarLeft, BorderLayout.WEST);
         toolbar.add(toolbarRight, BorderLayout.EAST);
 
@@ -152,14 +156,14 @@ public class ScansTab extends JPanel {
         logAutoScrollCheck = new JCheckBox("Auto-scroll", true);
         logAutoScrollCheck.setName("scansLogAutoScrollCheck");
 
-        JPanel logBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
-        logBar.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
-        logBar.add(new JLabel("Logs:"));
+        JPanel logBar = new JPanel(new FlowLayout(FlowLayout.LEFT, RecordToolbarStyle.CONTROL_GAP, 0));
+        logBar.setBorder(BorderFactory.createEmptyBorder(6, 12, 8, 12));
+        logBar.add(logRefreshBtn);
+        logBar.add(RecordToolbarStyle.separator());
         logBar.add(new JLabel("Level:"));
         logBar.add(logLevelCombo);
         logBar.add(new JLabel("Phase:"));
         logBar.add(logPhaseCombo);
-        logBar.add(logRefreshBtn);
         logBar.add(logAutoScrollCheck);
 
         logArea = new JTextArea();
@@ -176,8 +180,8 @@ public class ScansTab extends JPanel {
         JPanel logsPanel = new JPanel(new BorderLayout());
         logsPanel.setName("scansLogsPanel");
         JLabel logsHeader = new JLabel("Scan Logs");
-        logsHeader.setFont(UIManager.getFont("defaultFont").deriveFont(Font.BOLD));
-        logsHeader.setBorder(BorderFactory.createEmptyBorder(5, 10, 0, 10));
+        RecordToolbarStyle.makeBold(logsHeader);
+        logsHeader.setBorder(BorderFactory.createEmptyBorder(8, 12, 0, 12));
         logsPanel.add(logsHeader, BorderLayout.NORTH);
 
         JPanel logInner = new JPanel(new BorderLayout());
@@ -196,6 +200,7 @@ public class ScansTab extends JPanel {
         splitPane.setDividerSize(5);
 
         add(splitPane, BorderLayout.CENTER);
+        RefreshShortcut.install(this, refreshBtn);
 
         // Row context menu
         rowMenu = new JPopupMenu();

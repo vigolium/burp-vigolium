@@ -16,7 +16,6 @@ import com.vigolium.extension.ui.table.SortableHeaderRenderer;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.Font;
 import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -36,7 +35,6 @@ import javax.swing.JSplitPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
-import javax.swing.UIManager;
 import javax.swing.event.PopupMenuEvent;
 import javax.swing.event.PopupMenuListener;
 import javax.swing.table.JTableHeader;
@@ -90,6 +88,7 @@ public class HttpRecordsTab extends JPanel {
         table.setPreferredScrollableViewportSize(
                 new Dimension(table.getPreferredScrollableViewportSize().width, table.getRowHeight() * 10));
         table.setAutoResizeMode(JTable.AUTO_RESIZE_SUBSEQUENT_COLUMNS);
+        RecordToolbarStyle.styleTable(table);
 
         List<ColumnDef<HttpRecord>> colDefs = HttpRecordsColumnDefs.create();
         for (int i = 0; i < colDefs.size() && i < table.getColumnCount(); i++) {
@@ -146,7 +145,7 @@ public class HttpRecordsTab extends JPanel {
         JPanel requestPanel = new JPanel(new BorderLayout());
         requestPanel.setName("httpRecordsRequestPanel");
         JLabel requestLabel = new JLabel("Request");
-        requestLabel.setFont(UIManager.getFont("defaultFont").deriveFont(Font.BOLD));
+        RecordToolbarStyle.makeBold(requestLabel);
         requestLabel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
         requestPanel.add(requestLabel, BorderLayout.NORTH);
         requestPanel.add(requestEditor.uiComponent(), BorderLayout.CENTER);
@@ -154,7 +153,7 @@ public class HttpRecordsTab extends JPanel {
         JPanel responsePanel = new JPanel(new BorderLayout());
         responsePanel.setName("httpRecordsResponsePanel");
         JLabel responseLabel = new JLabel("Response");
-        responseLabel.setFont(UIManager.getFont("defaultFont").deriveFont(Font.BOLD));
+        RecordToolbarStyle.makeBold(responseLabel);
         responseLabel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
         responsePanel.add(responseLabel, BorderLayout.NORTH);
         responsePanel.add(responseEditor.uiComponent(), BorderLayout.CENTER);
@@ -203,21 +202,24 @@ public class HttpRecordsTab extends JPanel {
         pageSizeCombo.setName("httpRecordsPageSizeCombo");
         pageSizeCombo.setSelectedItem("50");
 
-        JPanel row1Left = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        JPanel row1Left = new JPanel(new FlowLayout(FlowLayout.LEFT, RecordToolbarStyle.CONTROL_GAP, 0));
+        row1Left.setName("httpRecordsPrimaryControls");
+        row1Left.add(refreshBtn);
+        row1Left.add(RecordToolbarStyle.separator());
         row1Left.add(new JLabel("Search:"));
         row1Left.add(searchField);
         row1Left.add(new JLabel("Domain:"));
         row1Left.add(domainField);
-        row1Left.add(refreshBtn);
 
-        JPanel row1Right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-        row1Right.add(prevBtn);
+        JPanel row1Right = new JPanel(new FlowLayout(FlowLayout.RIGHT, RecordToolbarStyle.CONTROL_GAP, 0));
         row1Right.add(pageInfoLabel);
+        row1Right.add(prevBtn);
         row1Right.add(nextBtn);
-        row1Right.add(new JLabel("Per page:"));
+        row1Right.add(RecordToolbarStyle.separator());
+        row1Right.add(new JLabel("Rows:"));
         row1Right.add(pageSizeCombo);
 
-        JPanel row1 = new JPanel(new BorderLayout());
+        JPanel row1 = new JPanel(new BorderLayout(12, 0));
         row1.add(row1Left, BorderLayout.WEST);
         row1.add(row1Right, BorderLayout.EAST);
 
@@ -238,7 +240,10 @@ public class HttpRecordsTab extends JPanel {
         minRiskField.setName("httpRecordsMinRiskField");
         minRiskField.putClientProperty("JTextField.placeholderText", "0");
 
-        JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT, RecordToolbarStyle.CONTROL_GAP, 0));
+        row2.setName("httpRecordsFilterControls");
+        row2.add(RecordToolbarStyle.sectionLabel("Filters"));
+        row2.add(RecordToolbarStyle.separator());
         row2.add(new JLabel("Method:"));
         row2.add(methodCombo);
         row2.add(new JLabel("Status:"));
@@ -253,13 +258,14 @@ public class HttpRecordsTab extends JPanel {
         JPanel toolbar = new JPanel();
         toolbar.setLayout(new BoxLayout(toolbar, BoxLayout.Y_AXIS));
         toolbar.setName("httpRecordsToolbar");
-        toolbar.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
+        toolbar.setBorder(RecordToolbarStyle.toolbarBorder());
         toolbar.add(row1);
-        toolbar.add(Box.createVerticalStrut(3));
+        toolbar.add(Box.createVerticalStrut(8));
         toolbar.add(row2);
 
         add(toolbar, BorderLayout.NORTH);
         add(splitPane, BorderLayout.CENTER);
+        RefreshShortcut.install(this, refreshBtn);
 
         table.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
@@ -375,12 +381,16 @@ public class HttpRecordsTab extends JPanel {
         nextBtn.setEnabled(response.hasMore());
     }
 
-    private String mapColumnToSortField(String colName) {
+    static String mapColumnToSortField(String colName) {
         return switch (colName) {
             case "Method" -> "method";
             case "Status" -> "status_code";
+            case "Host" -> "hostname";
             case "Path" -> "path";
+            case "Length" -> "response_content_length";
             case "Time (ms)" -> "response_time";
+            case "Risk" -> "risk_score";
+            case "Source" -> "source";
             case "Sent At" -> "sent_at";
             default -> null;
         };

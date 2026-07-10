@@ -16,9 +16,9 @@ import com.vigolium.extension.ui.table.FindingsTableModel;
 import com.vigolium.extension.ui.table.SeverityRenderer;
 import com.vigolium.extension.ui.table.SortableHeaderRenderer;
 import java.awt.BorderLayout;
+import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.Font;
 import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -28,18 +28,17 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
-import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
+import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
-import javax.swing.UIManager;
 import javax.swing.table.JTableHeader;
 import javax.swing.table.TableColumn;
 
@@ -70,8 +69,10 @@ public class FindingsTab extends JPanel {
 
     private final JLabel summaryLabel;
     private final JTextArea metaArea;
-    private final JComboBox<String> evidenceCombo;
+    private final JLabel evidenceCountLabel;
+    private final JTabbedPane evidenceTabs;
     private final JButton toggleDescriptionBtn;
+    private final JSplitPane editorSplitPane;
     private final JSplitPane detailSplit;
     private final JPanel summaryPanel;
     private int lastDescriptionDividerLocation = -1;
@@ -103,6 +104,7 @@ public class FindingsTab extends JPanel {
                 new Dimension(table.getPreferredScrollableViewportSize().width, table.getRowHeight() * 10));
         table.setDefaultRenderer(Severity.class, new SeverityRenderer());
         table.setAutoResizeMode(JTable.AUTO_RESIZE_SUBSEQUENT_COLUMNS);
+        RecordToolbarStyle.styleTable(table);
 
         List<ColumnDef<Finding>> colDefs = FindingsColumnDefs.create();
         for (int i = 0; i < colDefs.size() && i < table.getColumnCount(); i++) {
@@ -161,7 +163,7 @@ public class FindingsTab extends JPanel {
         summaryLabel = new JLabel(" ");
         summaryLabel.setName("findingsSummaryLabel");
         summaryLabel.putClientProperty("html.disable", Boolean.TRUE);
-        summaryLabel.setFont(UIManager.getFont("defaultFont").deriveFont(Font.BOLD));
+        RecordToolbarStyle.makeBold(summaryLabel);
         summaryLabel.setBorder(BorderFactory.createEmptyBorder(6, 10, 2, 10));
 
         metaArea = new JTextArea();
@@ -185,24 +187,34 @@ public class FindingsTab extends JPanel {
         summaryPanel.add(metaScroll, BorderLayout.CENTER);
         summaryPanel.setMinimumSize(new Dimension(0, 0));
 
-        evidenceCombo = new JComboBox<>(new DefaultComboBoxModel<>(new String[] {EVIDENCE_PRIMARY}));
-        evidenceCombo.setName("findingsEvidenceCombo");
-        evidenceCombo.addActionListener(e -> updateEvidenceEditors());
-
         toggleDescriptionBtn = new JButton("Show Description");
         toggleDescriptionBtn.setName("findingsToggleDescriptionButton");
         toggleDescriptionBtn.addActionListener(e -> setDescriptionVisible(!descriptionVisible));
 
-        JPanel evidenceBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 3));
+        copyDetailsBtn = new JButton("Copy Finding as Markdown");
+        copyDetailsBtn.setName("findingsCopyDetailsButton");
+        copyDetailsBtn.putClientProperty("FlatLaf.styleClass", "primary");
+        copyDetailsBtn.setEnabled(false);
+
+        evidenceCountLabel = new JLabel("Evidence");
+        evidenceCountLabel.setName("findingsEvidenceCountLabel");
+        RecordToolbarStyle.makeBold(evidenceCountLabel);
+
+        JPanel evidenceBar = new JPanel(new BorderLayout());
         evidenceBar.setName("findingsEvidenceBar");
-        evidenceBar.add(new JLabel("Evidence:"));
-        evidenceBar.add(evidenceCombo);
-        evidenceBar.add(toggleDescriptionBtn);
+        evidenceBar.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
+        evidenceBar.add(evidenceCountLabel, BorderLayout.WEST);
+
+        JPanel evidenceActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, RecordToolbarStyle.CONTROL_GAP, 0));
+        evidenceActions.setName("findingsEvidenceActions");
+        evidenceActions.add(toggleDescriptionBtn);
+        evidenceActions.add(copyDetailsBtn);
+        evidenceBar.add(evidenceActions, BorderLayout.EAST);
 
         JPanel requestPanel = new JPanel(new BorderLayout());
         requestPanel.setName("findingsRequestPanel");
         JLabel requestLabel = new JLabel("Request");
-        requestLabel.setFont(UIManager.getFont("defaultFont").deriveFont(Font.BOLD));
+        RecordToolbarStyle.makeBold(requestLabel);
         requestLabel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
         requestPanel.add(requestLabel, BorderLayout.NORTH);
         requestPanel.add(requestEditor.uiComponent(), BorderLayout.CENTER);
@@ -210,21 +222,29 @@ public class FindingsTab extends JPanel {
         JPanel responsePanel = new JPanel(new BorderLayout());
         responsePanel.setName("findingsResponsePanel");
         JLabel responseLabel = new JLabel("Response");
-        responseLabel.setFont(UIManager.getFont("defaultFont").deriveFont(Font.BOLD));
+        RecordToolbarStyle.makeBold(responseLabel);
         responseLabel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
         responsePanel.add(responseLabel, BorderLayout.NORTH);
         responsePanel.add(responseEditor.uiComponent(), BorderLayout.CENTER);
 
-        JSplitPane editorSplitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, requestPanel, responsePanel);
+        editorSplitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, requestPanel, responsePanel);
         editorSplitPane.setName("findingsEditorSplitPane");
         editorSplitPane.setResizeWeight(0.5);
         editorSplitPane.setBorder(null);
         editorSplitPane.setDividerSize(5);
 
+        evidenceTabs = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.SCROLL_TAB_LAYOUT);
+        evidenceTabs.setName("findingsEvidenceTabs");
+        evidenceTabs.addChangeListener(e -> {
+            attachEditorToSelectedEvidenceTab();
+            updateEvidenceEditors();
+        });
+        rebuildEvidenceTabs();
+
         JPanel evidencePane = new JPanel(new BorderLayout());
         evidencePane.setName("findingsEvidencePane");
         evidencePane.add(evidenceBar, BorderLayout.NORTH);
-        evidencePane.add(editorSplitPane, BorderLayout.CENTER);
+        evidencePane.add(evidenceTabs, BorderLayout.CENTER);
         evidencePane.setMinimumSize(new Dimension(0, 0));
 
         // Inner vertical split so the user can drag to expand the description/meta area.
@@ -265,9 +285,6 @@ public class FindingsTab extends JPanel {
         exportJsonBtn = new JButton("Export JSON");
         exportJsonBtn.setName("findingsExportJsonButton");
         exportJsonBtn.setEnabled(false);
-        copyDetailsBtn = new JButton("Copy Details");
-        copyDetailsBtn.setName("findingsCopyDetailsButton");
-        copyDetailsBtn.setEnabled(false);
 
         prevBtn = new JButton("Previous");
         prevBtn.setName("findingsPrevButton");
@@ -283,23 +300,26 @@ public class FindingsTab extends JPanel {
         pageSizeCombo.setName("findingsPageSizeCombo");
         pageSizeCombo.setSelectedItem("50");
 
-        JPanel row1Left = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        JPanel row1Left = new JPanel(new FlowLayout(FlowLayout.LEFT, RecordToolbarStyle.CONTROL_GAP, 0));
+        row1Left.setName("findingsPrimaryControls");
+        row1Left.add(refreshBtn);
+        row1Left.add(RecordToolbarStyle.separator());
         row1Left.add(new JLabel("Search:"));
         row1Left.add(searchField);
         row1Left.add(new JLabel("Severity:"));
         row1Left.add(severityCombo);
-        row1Left.add(refreshBtn);
+        row1Left.add(RecordToolbarStyle.separator());
         row1Left.add(exportJsonBtn);
-        row1Left.add(copyDetailsBtn);
 
-        JPanel row1Right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-        row1Right.add(prevBtn);
+        JPanel row1Right = new JPanel(new FlowLayout(FlowLayout.RIGHT, RecordToolbarStyle.CONTROL_GAP, 0));
         row1Right.add(pageInfoLabel);
+        row1Right.add(prevBtn);
         row1Right.add(nextBtn);
-        row1Right.add(new JLabel("Per page:"));
+        row1Right.add(RecordToolbarStyle.separator());
+        row1Right.add(new JLabel("Rows:"));
         row1Right.add(pageSizeCombo);
 
-        JPanel row1 = new JPanel(new BorderLayout());
+        JPanel row1 = new JPanel(new BorderLayout(12, 0));
         row1.add(row1Left, BorderLayout.WEST);
         row1.add(row1Right, BorderLayout.EAST);
 
@@ -323,7 +343,10 @@ public class FindingsTab extends JPanel {
         domainField.setName("findingsDomainField");
         domainField.putClientProperty("JTextField.placeholderText", "Domain (*.example.com)");
 
-        JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT, RecordToolbarStyle.CONTROL_GAP, 0));
+        row2.setName("findingsFilterControls");
+        row2.add(RecordToolbarStyle.sectionLabel("Filters"));
+        row2.add(RecordToolbarStyle.separator());
         row2.add(new JLabel("Type:"));
         row2.add(moduleTypeCombo);
         row2.add(new JLabel("Source:"));
@@ -338,13 +361,14 @@ public class FindingsTab extends JPanel {
         JPanel toolbar = new JPanel();
         toolbar.setLayout(new javax.swing.BoxLayout(toolbar, javax.swing.BoxLayout.Y_AXIS));
         toolbar.setName("findingsToolbar");
-        toolbar.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
+        toolbar.setBorder(RecordToolbarStyle.toolbarBorder());
         toolbar.add(row1);
-        toolbar.add(Box.createVerticalStrut(3));
+        toolbar.add(Box.createVerticalStrut(8));
         toolbar.add(row2);
 
         add(toolbar, BorderLayout.NORTH);
         add(splitPane, BorderLayout.CENTER);
+        RefreshShortcut.install(this, refreshBtn);
 
         table.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
@@ -374,7 +398,7 @@ public class FindingsTab extends JPanel {
         if (finding == null) {
             summaryLabel.setText(" ");
             metaArea.setText("");
-            evidenceCombo.setModel(new DefaultComboBoxModel<>(new String[] {EVIDENCE_PRIMARY}));
+            rebuildEvidenceTabs();
             setEditorBytes(null, null);
             copyDetailsBtn.setEnabled(false);
             return;
@@ -395,23 +419,12 @@ public class FindingsTab extends JPanel {
         metaArea.setText(buildMetaText(finding));
         metaArea.setCaretPosition(0);
 
-        // Evidence combo (Primary + Evidence #1..N)
-        String[] labels = new String[evidences.size()];
-        labels[0] = EVIDENCE_PRIMARY;
-        for (int i = 1; i < evidences.size(); i++) {
-            labels[i] = "Evidence #" + i;
-        }
-        evidenceCombo.setModel(new DefaultComboBoxModel<>(labels));
-        evidenceCombo.setSelectedIndex(0);
-        updateEvidenceEditors();
+        rebuildEvidenceTabs();
     }
 
     private void updateEvidenceEditors() {
-        int idx = evidenceCombo.getSelectedIndex();
-        if (idx < 0 || idx >= evidences.size()) {
-            setEditorBytes(null, null);
-            return;
-        }
+        int idx = evidenceTabs.getSelectedIndex();
+        if (idx < 0 || idx >= evidences.size()) return;
         Finding.Evidence ev = evidences.get(idx);
         byte[] reqBytes =
                 ev.request() != null && !ev.request().isEmpty() ? ev.request().getBytes() : null;
@@ -419,6 +432,36 @@ public class FindingsTab extends JPanel {
                 ? ev.response().getBytes()
                 : null;
         setEditorBytes(reqBytes, respBytes);
+    }
+
+    private void rebuildEvidenceTabs() {
+        evidenceTabs.removeAll();
+        int tabCount = Math.max(1, evidences.size());
+        for (int i = 0; i < tabCount; i++) {
+            String label = i == 0 ? EVIDENCE_PRIMARY : "Evidence #" + i;
+            JPanel tab = new JPanel(new BorderLayout());
+            tab.setName("findingsEvidenceTab" + i);
+            evidenceTabs.addTab(label, tab);
+            evidenceTabs.setToolTipTextAt(i, i == 0 ? "Primary finding evidence" : "Additional evidence #" + i);
+        }
+        evidenceCountLabel.setText(evidences.isEmpty() ? "Evidence" : "Evidence (" + evidences.size() + ")");
+        evidenceTabs.setSelectedIndex(0);
+        attachEditorToSelectedEvidenceTab();
+        updateEvidenceEditors();
+    }
+
+    private void attachEditorToSelectedEvidenceTab() {
+        if (!(evidenceTabs.getSelectedComponent() instanceof JPanel selectedTab)) return;
+        if (editorSplitPane.getParent() == selectedTab) return;
+        Container previous = editorSplitPane.getParent();
+        if (previous != null) previous.remove(editorSplitPane);
+        selectedTab.add(editorSplitPane, BorderLayout.CENTER);
+        if (previous != null) {
+            previous.revalidate();
+            previous.repaint();
+        }
+        selectedTab.revalidate();
+        selectedTab.repaint();
     }
 
     private void setEditorBytes(byte[] rawRequest, byte[] rawResponse) {
@@ -525,11 +568,13 @@ public class FindingsTab extends JPanel {
         nextBtn.setEnabled(response.hasMore());
     }
 
-    private String mapColumnToSortField(String colName) {
+    static String mapColumnToSortField(String colName) {
         return switch (colName) {
             case "Severity" -> "severity";
             case "Module" -> "module_name";
+            case "Description" -> "description";
             case "Confidence" -> "confidence";
+            case "Matched At" -> "matched_at";
             case "Found At" -> "found_at";
             default -> null;
         };

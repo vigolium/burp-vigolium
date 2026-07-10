@@ -23,39 +23,50 @@ public class ScanOptionsPanel extends JPanel {
     private final JLabel scanAllStatusLabel;
 
     public ScanOptionsPanel() {
-        super(new BorderLayout(0, 5));
+        super(new BorderLayout(0, 12));
         setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         setName("scanOptionsPanel");
 
-        // Header
-        JPanel headerPanel = new JPanel(new BorderLayout(5, 0));
+        JPanel headerPanel = new JPanel(new BorderLayout(0, 4));
         JLabel titleLabel = new JLabel("Scan Options");
         Font base = UIManager.getFont("defaultFont");
         if (base != null) {
             titleLabel.setFont(base.deriveFont(Font.BOLD, base.getSize() + 4f));
         }
-        headerPanel.add(titleLabel, BorderLayout.CENTER);
+        headerPanel.add(titleLabel, BorderLayout.NORTH);
 
         JLabel descLabel = new JLabel(
                 "Optional parameters applied when sending requests to scan. Leave blank to use server defaults.");
-        descLabel.setBorder(BorderFactory.createEmptyBorder(5, 0, 0, 0));
+        headerPanel.add(descLabel, BorderLayout.SOUTH);
 
-        JPanel topPanel = new JPanel(new BorderLayout());
-        topPanel.add(headerPanel, BorderLayout.NORTH);
-        topPanel.add(descLabel, BorderLayout.SOUTH);
-
-        // Form — single row: Custom modules: [field]   Timeout: [field]
         JPanel formPanel = new JPanel(new GridBagLayout());
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.anchor = GridBagConstraints.WEST;
-        gbc.insets = new Insets(0, 0, 0, 5);
 
-        gbc.gridx = 0;
+        scanAllButton = new JButton("Scan All HTTP Records");
+        scanAllButton.setName("scanOptionsScanAllButton");
+        scanAllButton.putClientProperty("FlatLaf.styleClass", "primary");
+        scanAllButton.setToolTipText(
+                "Sends every HTTP record in the current project to the scanner (POST /api/scan-all-records). "
+                        + "Uses the modules and timeout configured above; leave them blank for server defaults.");
+        GridBagConstraints buttonConstraints = new GridBagConstraints();
+        buttonConstraints.gridx = 0;
+        buttonConstraints.gridy = 0;
+        buttonConstraints.anchor = GridBagConstraints.LINE_START;
+        buttonConstraints.insets = new Insets(0, 0, 0, 12);
+        formPanel.add(scanAllButton, buttonConstraints);
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.anchor = GridBagConstraints.LINE_END;
+        gbc.insets = new Insets(0, 0, 0, 8);
+
+        gbc.gridx = 1;
         gbc.gridy = 0;
         formPanel.add(new JLabel("Custom modules:"), gbc);
 
-        gbc.gridx = 1;
-        modulesField = new JTextField(35);
+        gbc.gridx = 2;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.insets = new Insets(0, 0, 0, 0);
+        modulesField = new JTextField(32);
         modulesField.setName("scanOptionsModulesField");
         modulesField.setToolTipText(
                 "Comma-separated module IDs (e.g. xss-scanner,sqli-error-based). Blank = scan all.");
@@ -63,51 +74,35 @@ public class ScanOptionsPanel extends JPanel {
                 "JTextField.placeholderText", "xss-scanner,sqli-error-based (blank = all modules)");
         formPanel.add(modulesField, gbc);
 
-        gbc.gridx = 2;
-        gbc.insets = new Insets(0, 15, 0, 5);
+        gbc.gridx = 3;
+        gbc.weightx = 0;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.anchor = GridBagConstraints.LINE_END;
+        gbc.insets = new Insets(0, 18, 0, 8);
         formPanel.add(new JLabel("Timeout:"), gbc);
 
-        gbc.gridx = 3;
-        gbc.insets = new Insets(0, 0, 0, 5);
+        gbc.gridx = 4;
+        gbc.anchor = GridBagConstraints.LINE_START;
+        gbc.insets = new Insets(0, 0, 0, 0);
         timeoutField = new JTextField(12);
         timeoutField.setName("scanOptionsTimeoutField");
         timeoutField.setToolTipText("Request timeout as Go duration (e.g. 30s, 2m). Blank = server default.");
         timeoutField.putClientProperty("JTextField.placeholderText", "30s, 2m (blank = server default)");
         formPanel.add(timeoutField, gbc);
 
-        gbc.gridx = 4;
-        gbc.weightx = 1.0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        formPanel.add(javax.swing.Box.createHorizontalGlue(), gbc);
-
-        // Row 1: Scan All HTTP Records button + inline status
-        scanAllButton = new JButton("Scan All HTTP Records");
-        scanAllButton.setName("scanOptionsScanAllButton");
-        scanAllButton.putClientProperty("FlatLaf.styleClass", "primary");
-        scanAllButton.setToolTipText(
-                "Sends every HTTP record in the current project to the scanner (POST /api/scan-all-records). "
-                        + "Uses the modules and timeout configured above; leave them blank for server defaults.");
-
         scanAllStatusLabel = new JLabel(" ");
         scanAllStatusLabel.setName("scanOptionsScanAllStatusLabel");
-        scanAllStatusLabel.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 0));
+        GridBagConstraints statusConstraints = new GridBagConstraints();
+        statusConstraints.gridx = 2;
+        statusConstraints.gridy = 1;
+        statusConstraints.gridwidth = 3;
+        statusConstraints.weightx = 1.0;
+        statusConstraints.fill = GridBagConstraints.HORIZONTAL;
+        statusConstraints.anchor = GridBagConstraints.LINE_START;
+        statusConstraints.insets = new Insets(8, 0, 0, 0);
+        formPanel.add(scanAllStatusLabel, statusConstraints);
 
-        GridBagConstraints btnGbc = new GridBagConstraints();
-        btnGbc.gridx = 0;
-        btnGbc.gridy = 1;
-        btnGbc.anchor = GridBagConstraints.WEST;
-        btnGbc.insets = new Insets(8, 0, 0, 0);
-        formPanel.add(scanAllButton, btnGbc);
-
-        btnGbc = new GridBagConstraints();
-        btnGbc.gridx = 1;
-        btnGbc.gridy = 1;
-        btnGbc.gridwidth = 3;
-        btnGbc.anchor = GridBagConstraints.WEST;
-        btnGbc.insets = new Insets(8, 0, 0, 0);
-        formPanel.add(scanAllStatusLabel, btnGbc);
-
-        add(topPanel, BorderLayout.NORTH);
+        add(headerPanel, BorderLayout.NORTH);
         add(formPanel, BorderLayout.CENTER);
     }
 

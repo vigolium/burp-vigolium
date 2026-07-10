@@ -18,8 +18,16 @@ public class VigoliumSettingsImpl implements VigoliumSettings {
     private static final String KEY_HOTKEY_INGEST = "vigolium.hotkeyIngest";
     private static final String KEY_HOTKEY_SCAN = "vigolium.hotkeyScan";
     private static final String KEY_HOTKEY_AGENT_SCAN = "vigolium.hotkeyAgentScan";
+    private static final String KEY_HOTKEY_SNAPSHOT_SITEMAP = "vigolium.hotkeySnapshotSitemap";
     private static final String KEY_CUSTOM_MODULES = "vigolium.customModules";
     private static final String KEY_SCAN_TIMEOUT = "vigolium.scanTimeout";
+    private static final String KEY_SNAPSHOT_AUTO_ENABLED = "vigolium.snapshotAutoEnabled";
+    private static final String KEY_SNAPSHOT_INTERVAL_MINUTES = "vigolium.snapshotIntervalMinutes";
+    private static final String KEY_SNAPSHOT_IN_SCOPE_ONLY = "vigolium.snapshotInScopeOnly";
+    private static final String KEY_BRIDGE_ENABLED = "vigolium.bridgeEnabled";
+    private static final String KEY_BRIDGE_LISTEN_URL = "vigolium.bridgeListenUrl";
+    private static final String KEY_BRIDGE_IN_SCOPE_ONLY = "vigolium.bridgeInScopeOnly";
+    private static final String LEGACY_KEY_BRIDGE_LONG_POLL_URL = "vigolium.bridgeLongPollUrl";
 
     private static final Type FILTER_RULE_LIST_TYPE = new TypeToken<List<FilterRule>>() {}.getType();
 
@@ -118,7 +126,7 @@ public class VigoliumSettingsImpl implements VigoliumSettings {
     @Override
     public String getScanHotkey() {
         String value = preferences.getString(KEY_HOTKEY_SCAN);
-        return value != null ? value : "Ctrl+Alt+R";
+        return value != null ? value : "Ctrl+Alt+N";
     }
 
     @Override
@@ -136,6 +144,18 @@ public class VigoliumSettingsImpl implements VigoliumSettings {
     @Override
     public void setAgentScanHotkey(String montoyaKey) {
         preferences.setString(KEY_HOTKEY_AGENT_SCAN, montoyaKey);
+        notifyListeners();
+    }
+
+    @Override
+    public String getSnapshotSitemapHotkey() {
+        String value = preferences.getString(KEY_HOTKEY_SNAPSHOT_SITEMAP);
+        return value != null ? value : "Ctrl+Alt+S";
+    }
+
+    @Override
+    public void setSnapshotSitemapHotkey(String montoyaKey) {
+        preferences.setString(KEY_HOTKEY_SNAPSHOT_SITEMAP, montoyaKey);
         notifyListeners();
     }
 
@@ -162,6 +182,83 @@ public class VigoliumSettingsImpl implements VigoliumSettings {
     @Override
     public void setScanTimeout(String timeout) {
         preferences.setString(KEY_SCAN_TIMEOUT, timeout != null ? timeout : "");
+        notifyListeners();
+    }
+
+    // --- SnapshotSettings ---
+
+    @Override
+    public boolean isSnapshotAutoEnabled() {
+        Boolean value = preferences.getBoolean(KEY_SNAPSHOT_AUTO_ENABLED);
+        return value != null ? value : false;
+    }
+
+    @Override
+    public void setSnapshotAutoEnabled(boolean enabled) {
+        preferences.setBoolean(KEY_SNAPSHOT_AUTO_ENABLED, enabled);
+        notifyListeners();
+    }
+
+    @Override
+    public int getSnapshotIntervalMinutes() {
+        Integer value = preferences.getInteger(KEY_SNAPSHOT_INTERVAL_MINUTES);
+        return value != null && value > 0 ? value : 5;
+    }
+
+    @Override
+    public void setSnapshotIntervalMinutes(int minutes) {
+        preferences.setInteger(KEY_SNAPSHOT_INTERVAL_MINUTES, Math.max(1, minutes));
+        notifyListeners();
+    }
+
+    @Override
+    public boolean isSnapshotInScopeOnly() {
+        Boolean value = preferences.getBoolean(KEY_SNAPSHOT_IN_SCOPE_ONLY);
+        return value != null ? value : true;
+    }
+
+    @Override
+    public void setSnapshotInScopeOnly(boolean inScopeOnly) {
+        preferences.setBoolean(KEY_SNAPSHOT_IN_SCOPE_ONLY, inScopeOnly);
+        notifyListeners();
+    }
+
+    // --- BridgeSettings ---
+
+    @Override
+    public boolean isBridgeEnabled() {
+        Boolean value = preferences.getBoolean(KEY_BRIDGE_ENABLED);
+        return value != null ? value : false;
+    }
+
+    @Override
+    public void setBridgeEnabled(boolean enabled) {
+        preferences.setBoolean(KEY_BRIDGE_ENABLED, enabled);
+        notifyListeners();
+    }
+
+    @Override
+    public String getBridgeListenUrl() {
+        String value = preferences.getString(KEY_BRIDGE_LISTEN_URL);
+        if (value == null) value = preferences.getString(LEGACY_KEY_BRIDGE_LONG_POLL_URL);
+        return value != null ? value : "http://127.0.0.1:9009";
+    }
+
+    @Override
+    public void setBridgeListenUrl(String url) {
+        preferences.setString(KEY_BRIDGE_LISTEN_URL, url != null ? url.trim() : "");
+        notifyListeners();
+    }
+
+    @Override
+    public boolean isBridgeInScopeOnly() {
+        Boolean value = preferences.getBoolean(KEY_BRIDGE_IN_SCOPE_ONLY);
+        return value != null ? value : false;
+    }
+
+    @Override
+    public void setBridgeInScopeOnly(boolean inScopeOnly) {
+        preferences.setBoolean(KEY_BRIDGE_IN_SCOPE_ONLY, inScopeOnly);
         notifyListeners();
     }
 

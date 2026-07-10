@@ -15,6 +15,8 @@ import com.vigolium.extension.model.ScanLogEntry;
 import com.vigolium.extension.model.Severity;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -78,6 +80,15 @@ public class VigoliumApiService {
                 .post(RequestBody.create(json, JSON))
                 .build();
         executeWithRetry(request);
+    }
+
+    public SnapshotChunkResponse snapshotSiteMap(SiteMapSnapshotRequest snapshotRequest) {
+        String json = gson.toJson(snapshotRequest);
+        Request request = newRequestBuilder("/api/burp/sitemap/snapshot")
+                .post(RequestBody.create(json, JSON))
+                .build();
+        String body = executeWithRetry(request);
+        return gson.fromJson(body, SnapshotChunkResponse.class);
     }
 
     public ScanResponse scan(ScanRequest scanRequest) {
@@ -489,6 +500,18 @@ public class VigoliumApiService {
     public boolean isConfigured() {
         String url = serverUrlSupplier.get();
         return url != null && !url.isBlank();
+    }
+
+    String destinationIdentity() {
+        String url = resolveServerUrl();
+        String key = apiKeySupplier.get();
+        String destination = (url == null ? "" : url.strip()) + '\0' + (key == null ? "" : key);
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(destination.getBytes(StandardCharsets.UTF_8));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
     }
 
     private HttpUrl parseUrl(String path) {
