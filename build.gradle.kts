@@ -4,6 +4,8 @@ plugins {
     id("com.diffplug.spotless") version "7.0.2"
 }
 
+version = "0.1.1"
+
 java {
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
@@ -36,6 +38,11 @@ spotless {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+// Keep jar filenames stable (no version suffix) so the distributed `burp-vigolium.jar` name holds
+tasks.withType<Jar> {
+    archiveVersion.set("")
 }
 
 tasks.shadowJar {

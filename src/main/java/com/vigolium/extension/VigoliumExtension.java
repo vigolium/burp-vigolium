@@ -37,6 +37,9 @@ import javax.swing.event.DocumentListener;
 
 public class VigoliumExtension implements BurpExtension {
 
+    // Keep in sync with the `version` in build.gradle.kts
+    private static final String VERSION = "0.1.1";
+
     private MontoyaApi montoyaApi;
     private FindingsController findingsController;
     private HttpRecordsController httpRecordsController;
@@ -50,7 +53,7 @@ public class VigoliumExtension implements BurpExtension {
     @Override
     public void initialize(MontoyaApi api) {
         this.montoyaApi = api;
-        api.extension().setName("Vigolium");
+        api.extension().setName("Vigolium v" + VERSION);
 
         // Services
         VigoliumSettings settings = new VigoliumSettingsImpl(api.persistence().preferences());
