@@ -10,6 +10,8 @@ A Burp Suite extension for sending HTTP traffic to the Vigolium security scannin
 | Vigolium Burp Integration 1 | Vigolium Burp Integration 2 |
 |:---:|:---:|
 | ![Vigolium Burp Integration 1](https://github.com/vigolium/docs/blob/main/images/vigolium-burp-extension-1.png?raw=true) | ![Vigolium Burp Integration 2](https://github.com/vigolium/docs/blob/main/images/vigolium-burp-extension-2.png?raw=true) |
+| ![Vigolium Burp Integration 3](https://github.com/vigolium/docs/blob/main/images/burp-extension/vigolium-burp-ext-3.png?raw=true) | ![Vigolium Burp Integration 4](https://github.com/vigolium/docs/blob/main/images/burp-extension/vigolium-burp-ext-1.png?raw=true) |
+
 
 ## Architecture
 
