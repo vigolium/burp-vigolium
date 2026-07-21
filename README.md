@@ -2,7 +2,7 @@
 
 A Burp Suite extension for sending HTTP traffic to the Vigolium security scanning engine, reviewing the resulting findings, and synchronizing traffic in both directions. It supports explicit dispatch from Burp, automatic Proxy forwarding, Target Site map snapshots, and an optional loopback-only live bridge for CLI and server integrations.
 
-- **Version:** `0.2.0`
+- **Version:** `0.2.1`
 - **GitHub:** [github.com/vigolium/vigolium](https://github.com/vigolium/vigolium)
 - **Docs:** [docs.vigolium.com](https://docs.vigolium.com/)
 - **Site:** [www.vigolium.com](https://www.vigolium.com/)
@@ -164,7 +164,15 @@ responses refresh the existing database row, and unchanged traffic is skipped.
 
 Search and inspect remain read-only. The internal Site map write route accepts
 the same `burp_base64` request/response fields as Vigolium's `/api/ingest-http`
-and calls Montoya's `SiteMap.add`; users do not need to call it directly.
+and calls Montoya's `SiteMap.add`; users do not need to call it directly. The
+Repeater route takes the same request fields and calls Montoya's
+`Repeater.sendToRepeater` on the event dispatch thread. The send route hands the
+request to Montoya's `Http.sendRequest` — Burp's own HTTP stack — so malformed
+requests (deliberate `Content-Length`, request smuggling, unusual methods) go on
+the wire byte-for-byte instead of being normalised by an ordinary HTTP client.
+The organizer route calls `Organizer.sendToOrganizer` with a request/response
+pair — the one Burp tool that keeps both together and can forward to Repeater,
+since a Repeater tab itself is request-only.
 
 Disabling the setting or unloading the extension stops the listener and expires its temporary result references.
 
@@ -186,6 +194,111 @@ curl --silent --show-error \
 ```
 
 The request body contains a Base64-encoded `GET /imported` request and a small `200 OK` response. `http_request_base64` is required; `http_response_base64` is optional when only a request is available. A successful response contains `"added":1`. This listener does not use the Vigolium API key or any separate bridge credentials.
+
+#### Send a request to Repeater for manual testing
+
+Site map imports are for bulk traffic; **Repeater** is for the one request you want to hand-test. This route opens a Repeater tab directly:
+
+```bash
+curl --silent --show-error \
+  --request POST 'http://127.0.0.1:9009/api/burp-bridge/repeater' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "url": "https://example.com/imported",
+    "tab_name": "idor-1",
+    "http_request_base64": "R0VUIC9pbXBvcnRlZCBIVFRQLzEuMQ0KSG9zdDogZXhhbXBsZS5jb20NCkFjY2VwdDogKi8qDQoNCg=="
+  }'
+```
+
+A successful response contains `"sent":1`. `tab_name` is optional and defaults to `vigolium` (trimmed to 64 characters). No response field is accepted — a Repeater tab only carries a request; its response pane fills when you click **Send** inside Burp. To keep a request *and* its response together, use [`/organizer`](#keep-a-request-and-its-response-together-for-manual-work-organizer) instead.
+
+You can also replay an item already found through `search` by passing its `ref` instead of `url` plus `http_request_base64`:
+
+```bash
+curl --request POST 'http://127.0.0.1:9009/api/burp-bridge/repeater' \
+  --header 'Content-Type: application/json' \
+  --data '{"ref": "<ref from /api/burp-bridge/search>", "tab_name": "replay"}'
+```
+
+Because every call opens a visible tab, this route is capped more tightly than the Site map route: **30 tabs per minute** (a sliding window; the limit is reported as `repeater_tabs_per_minute` on `/health`) and **1 MiB** per request. Exceeding the rate returns HTTP `429` and sends nothing.
+
+**Stage the tab *and* have Burp send it.** Add `"send": true` to also issue the request through Burp's HTTP stack (accepting the same `http_mode` / `timeout_ms` options as `/send`) and return the response in the reply:
+
+```bash
+curl --request POST 'http://127.0.0.1:9009/api/burp-bridge/repeater' \
+  --header 'Content-Type: application/json' \
+  --data '{"url":"https://example.com/imported","tab_name":"probe","send":true,"http_mode":"http1",
+           "http_request_base64":"R0VUIC9pbXBvcnRlZCBIVFRQLzEuMQ0KSG9zdDogZXhhbXBsZS5jb20NCkFjY2VwdDogKi8qDQoNCg=="}'
+# → {"sent":1,"tab_name":"probe","executed":true,"status_code":200,"response_base64":"…","elapsed_ms":87,…}
+```
+
+`sent:1` means the tab was staged; `executed:true` and the response fields report Burp's own send. **The fetched response is returned here, not painted into the Repeater tab** — Burp's API can't preload a tab's response pane, so to see it live in Burp you still click **Send** in the tab. When the Bridge's **In-scope items only** setting is on and the target is out of scope, the tab is still staged but the auto-send is skipped (`executed:false` with an `error` note) rather than failing the call. A target-side failure returns `executed:false` with an `error`; the tab still opens so you can retry by hand.
+
+#### Send a request through Burp and get the response back
+
+`/repeater` only stages a tab for you to drive by hand. To have Burp actually **issue** the request — using its HTTP engine, not an external client — and return the response, use `/send`. This is the route for replaying or fuzzing malformed requests, because Burp puts your exact bytes on the wire:
+
+```bash
+curl --silent --show-error \
+  --request POST 'http://127.0.0.1:9009/api/burp-bridge/send' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "url": "https://example.com/imported",
+    "http_mode": "http1",
+    "timeout_ms": 15000,
+    "add_to_sitemap": false,
+    "http_request_base64": "R0VUIC9pbXBvcnRlZCBIVFRQLzEuMQ0KSG9zdDogZXhhbXBsZS5jb20NCkFjY2VwdDogKi8qDQoNCg=="
+  }'
+```
+
+A successful response looks like `{"sent":1,"status_code":200,"response_base64":"…","response_length":1234,"response_truncated":false,"elapsed_ms":87,"http_mode":"HTTP_1","added_to_sitemap":false}`.
+
+| Field | Default | Notes |
+|-------|---------|-------|
+| `http_request_base64` / `ref` | — | Supply raw request bytes, or a `ref` from `/search` to replay it |
+| `http_mode` | `auto` | `auto`, `http1`, `http2`, `http2_ignore_alpn`. Use `http1` for classic request-smuggling payloads — `auto` may negotiate HTTP/2 and reframe them |
+| `timeout_ms` | `30000` | Response timeout, capped at `120000` |
+| `add_to_sitemap` | `false` | When `true`, the sent request/response is also recorded in **Target → Site map** (the response is always returned regardless) |
+
+Scope: when the Bridge's **In-scope items only** setting is enabled, `/send` refuses out-of-scope targets with HTTP `403` (reported as `send_respects_in_scope_only` on `/health`); with the setting off, any host is allowed. A target-side failure (connection refused, timeout) is not a bridge error — it returns HTTP `200` with `"sent":0` and an `error` field so per-request outcomes stay uniform when fuzzing. The response body is returned up to 4 MiB (`response_truncated` flags the cut); the full length is always in `response_length`.
+
+#### Keep a request *and* its response together for manual work (Organizer)
+
+A Burp Repeater tab only ever holds a **request** — there is no API to preload a response into it. To keep a request **and** its response side by side in a Burp tool you can revisit and re-send, use the **Organizer**: `/organizer` calls Montoya's `Organizer.sendToOrganizer`, which stores the pair. From the Organizer tab you can right-click an item and **Send to Repeater** for hands-on testing.
+
+Supply a response you already have (for example from an earlier `/send`):
+
+```bash
+curl --request POST 'http://127.0.0.1:9009/api/burp-bridge/organizer' \
+  --header 'Content-Type: application/json' \
+  --data '{"url":"https://example.com/imported",
+           "http_request_base64":"R0VUIC9pbXBvcnRlZCBIVFRQLzEuMQ0KSG9zdDogZXhhbXBsZS5jb20NCkFjY2VwdDogKi8qDQoNCg==",
+           "http_response_base64":"SFRUUC8xLjEgMjAwIE9LDQpDb250ZW50LUxlbmd0aDogMg0KDQpPSw=="}'
+# → {"added":1,"url":"…","request_hash":"…","has_response":true,"message":"added 1 item to Burp Organizer"}
+```
+
+Or send just the request and let Burp fetch the response, then store the whole exchange in one call — this is the "request in, response back, imported for manual testing" flow:
+
+```bash
+curl --request POST 'http://127.0.0.1:9009/api/burp-bridge/organizer' \
+  --header 'Content-Type: application/json' \
+  --data '{"url":"https://example.com/imported","send":true,"http_mode":"http1",
+           "http_request_base64":"R0VUIC9pbXBvcnRlZCBIVFRQLzEuMQ0KSG9zdDogZXhhbXBsZS5jb20NCkFjY2VwdDogKi8qDQoNCg=="}'
+# → {"added":1,…,"has_response":true,"status_code":200,"response_base64":"…","elapsed_ms":87}
+```
+
+`http_response_base64` takes precedence; `send:true` only fetches a response when none was supplied. The send honours the same **In-scope items only** gate as `/send` (out-of-scope + setting on → HTTP `403`, nothing organized), and `http_mode` / `timeout_ms` behave exactly as they do there. A supplied response is optional — with neither a response nor `send`, the item is stored request-only.
+
+**Labelling items.** Burp's Organizer is a flat list — it has no collections or per-item title, and `sendToOrganizer` takes no name (unlike Repeater's `tab_name`). The one editable label is the item's **Notes** (shown in the Organizer's Notes column), plus a **highlight colour** you can use to group a batch visually. Both are optional:
+
+```bash
+curl --request POST 'http://127.0.0.1:9009/api/burp-bridge/organizer' \
+  --header 'Content-Type: application/json' \
+  --data '{"url":"https://example.com/imported","notes":"recon-batch-1","highlight":"red",
+           "http_request_base64":"R0VUIC9pbXBvcnRlZCBIVFRQLzEuMQ0KSG9zdDogZXhhbXBsZS5jb20NCkFjY2VwdDogKi8qDQoNCg=="}'
+```
+
+`notes` (≤200 chars, single line) overrides the default `Imported from {source} via Vigolium bridge` note and is echoed back in the reply. `highlight` accepts `none`, `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `pink`, `magenta`, `gray` (an unknown colour returns HTTP `400`, nothing organized). Both also work alongside `send:true`.
 
 ## API endpoints used by the extension
 
@@ -212,6 +325,9 @@ The loopback bridge listener is separate from the Vigolium API:
 | `POST` | `/api/burp-bridge/search` | Search Burp Proxy history or the Target Site map |
 | `POST` | `/api/burp-bridge/inspect` | Retrieve request/response data for a temporary search reference |
 | `POST` | `/api/burp-bridge/sitemap` | Add a Base64-encoded request/response item to Burp's Target Site map |
+| `POST` | `/api/burp-bridge/repeater` | Open a Base64-encoded request (or a search `ref`) in a Burp Repeater tab |
+| `POST` | `/api/burp-bridge/send` | Issue a request through Burp's HTTP stack (preserving malformed bytes) and return the response |
+| `POST` | `/api/burp-bridge/organizer` | Store a request + response pair in Burp's Organizer (optionally sending first) for manual follow-up |
 
 Its bidirectional transport is unauthenticated and restricted to the local machine. The listener rejects unexpected Host and Origin headers. Search results use temporary references that expire when the listener restarts or the extension unloads.
 

@@ -3,7 +3,10 @@ package com.vigolium.extension.service;
 import burp.api.montoya.MontoyaApi;
 import burp.api.montoya.core.Annotations;
 import burp.api.montoya.core.ByteArray;
+import burp.api.montoya.core.HighlightColor;
+import burp.api.montoya.http.HttpMode;
 import burp.api.montoya.http.HttpService;
+import burp.api.montoya.http.RequestOptions;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
@@ -14,6 +17,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.vigolium.extension.config.BridgeSettings;
 import fi.iki.elonen.NanoHTTPD;
+import java.lang.reflect.InvocationTargetException;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -23,10 +27,12 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -46,12 +52,28 @@ public class BurpBridgeService {
     private static final int MAX_INSPECT_BYTES = 4 * 1024 * 1024;
     private static final int MAX_SITE_MAP_MESSAGE_BYTES = 8 * 1024 * 1024;
     private static final int MAX_WRITE_BODY_BYTES = 24 * 1024 * 1024;
+    // Repeater opens a visible tab per call, so it is capped far below the site
+    // map limits: a runaway client should not be able to bury the UI in tabs.
+    private static final int MAX_REPEATER_MESSAGE_BYTES = 1024 * 1024;
+    private static final int MAX_REPEATER_BODY_BYTES = 2 * 1024 * 1024;
+    private static final int MAX_REPEATER_TABS_PER_MINUTE = 30;
+    // /send issues the request through Burp's own HTTP stack and hands back the
+    // response, so it carries the larger site-map-style caps rather than the
+    // tab-oriented Repeater ones.
+    private static final long DEFAULT_SEND_TIMEOUT_MILLIS = 30_000L;
+    private static final long MAX_SEND_TIMEOUT_MILLIS = 120_000L;
+    private static final String SCOPE_BLOCKED_MESSAGE =
+            "target is out of Burp scope; disable in-scope-only or add it to Target scope";
 
     private final MontoyaApi api;
     private final BridgeSettings settings;
     private final LogService logService;
     private final SiteMapItemFactory siteMapItemFactory;
+    private final RepeaterSender repeaterSender;
+    private final RequestSender requestSender;
+    private final OrganizerSender organizerSender;
     private final Map<String, BridgeItem> references = new LinkedHashMap<>();
+    private final Deque<Instant> repeaterSends = new ArrayDeque<>();
 
     private volatile Consumer<BridgeStatus> statusListener;
     private volatile BridgeStatus status = BridgeStatus.disabled();
@@ -59,15 +81,49 @@ public class BurpBridgeService {
     private volatile BridgeBinding bridgeBinding;
 
     public BurpBridgeService(MontoyaApi api, BridgeSettings settings, LogService logService) {
-        this(api, settings, logService, BurpBridgeService::createSiteMapItem);
+        this(api, settings, logService, null);
     }
 
     BurpBridgeService(
             MontoyaApi api, BridgeSettings settings, LogService logService, SiteMapItemFactory siteMapItemFactory) {
+        this(api, settings, logService, siteMapItemFactory, null);
+    }
+
+    BurpBridgeService(
+            MontoyaApi api,
+            BridgeSettings settings,
+            LogService logService,
+            SiteMapItemFactory siteMapItemFactory,
+            RepeaterSender repeaterSender) {
+        this(api, settings, logService, siteMapItemFactory, repeaterSender, null);
+    }
+
+    BurpBridgeService(
+            MontoyaApi api,
+            BridgeSettings settings,
+            LogService logService,
+            SiteMapItemFactory siteMapItemFactory,
+            RepeaterSender repeaterSender,
+            RequestSender requestSender) {
+        this(api, settings, logService, siteMapItemFactory, repeaterSender, requestSender, null);
+    }
+
+    BurpBridgeService(
+            MontoyaApi api,
+            BridgeSettings settings,
+            LogService logService,
+            SiteMapItemFactory siteMapItemFactory,
+            RepeaterSender repeaterSender,
+            RequestSender requestSender,
+            OrganizerSender organizerSender) {
         this.api = api;
         this.settings = settings;
         this.logService = logService;
-        this.siteMapItemFactory = siteMapItemFactory;
+        this.siteMapItemFactory =
+                siteMapItemFactory != null ? siteMapItemFactory : BurpBridgeService::createSiteMapItem;
+        this.repeaterSender = repeaterSender != null ? repeaterSender : this::sendToRepeaterOnEdt;
+        this.requestSender = requestSender != null ? requestSender : this::sendThroughBurp;
+        this.organizerSender = organizerSender != null ? organizerSender : this::sendToOrganizerOnEdt;
     }
 
     public void setStatusListener(Consumer<BridgeStatus> listener) {
@@ -157,6 +213,11 @@ public class BurpBridgeService {
         if (path.equals("/api/burp-bridge/inspect")) return handleJsonEndpoint(session, this::inspect);
         if (path.equals("/api/burp-bridge/sitemap"))
             return handleJsonEndpoint(session, this::addToSiteMap, MAX_WRITE_BODY_BYTES);
+        if (path.equals("/api/burp-bridge/repeater"))
+            return handleJsonEndpoint(session, this::sendToRepeater, MAX_REPEATER_BODY_BYTES);
+        if (path.equals("/api/burp-bridge/send")) return handleJsonEndpoint(session, this::send, MAX_WRITE_BODY_BYTES);
+        if (path.equals("/api/burp-bridge/organizer"))
+            return handleJsonEndpoint(session, this::sendToOrganizer, MAX_WRITE_BODY_BYTES);
         return writeError(NanoHTTPD.Response.Status.NOT_FOUND, "not found");
     }
 
@@ -175,7 +236,12 @@ public class BurpBridgeService {
         capabilities.add("search_burp_items");
         capabilities.add("inspect_burp_item");
         capabilities.add("add_sitemap_item");
+        capabilities.add("send_to_repeater");
+        capabilities.add("send_request");
+        capabilities.add("add_organizer_item");
         response.add("capabilities", capabilities);
+        response.addProperty("repeater_tabs_per_minute", MAX_REPEATER_TABS_PER_MINUTE);
+        response.addProperty("send_respects_in_scope_only", settings.isBridgeInScopeOnly());
         return writeJson(NanoHTTPD.Response.Status.OK, response);
     }
 
@@ -195,10 +261,7 @@ public class BurpBridgeService {
             }
             int contentLength = Integer.parseInt(contentLengthValue);
             if (contentLength < 0 || contentLength > maxBodyBytes) {
-                String limit = maxBodyBytes >= 1024 * 1024
-                        ? (maxBodyBytes / (1024 * 1024)) + " MiB"
-                        : (maxBodyBytes / 1024) + " KiB";
-                return writeError(NanoHTTPD.Response.Status.BAD_REQUEST, "request exceeds " + limit);
+                return writeError(NanoHTTPD.Response.Status.BAD_REQUEST, "request exceeds " + humanBytes(maxBodyBytes));
             }
             byte[] body = session.getInputStream().readNBytes(contentLength);
             if (body.length != contentLength) {
@@ -217,6 +280,10 @@ public class BurpBridgeService {
                     current.startedAt(),
                     Instant.now()));
             return writeJson(NanoHTTPD.Response.Status.OK, result);
+        } catch (RateLimitedException e) {
+            return writeError(NanoHTTPD.Response.Status.TOO_MANY_REQUESTS, e.getMessage());
+        } catch (ScopeBlockedException e) {
+            return writeError(NanoHTTPD.Response.Status.FORBIDDEN, e.getMessage());
         } catch (IllegalArgumentException e) {
             return writeError(NanoHTTPD.Response.Status.BAD_REQUEST, e.getMessage());
         } catch (Exception e) {
@@ -274,11 +341,7 @@ public class BurpBridgeService {
     private JsonObject inspect(JsonObject args) {
         String ref = getString(args, "ref");
         if (ref.isBlank()) throw new IllegalArgumentException("ref is required");
-        BridgeItem item;
-        synchronized (references) {
-            item = references.get(ref);
-        }
-        if (item == null) throw new IllegalArgumentException("Burp ref expired or unknown; search again");
+        BridgeItem item = requireItem(ref);
         int maxBytes = args.has("max_bytes") ? args.get("max_bytes").getAsInt() : 16384;
         maxBytes = Math.max(1024, Math.min(maxBytes, MAX_INSPECT_BYTES));
         byte[] request = item.request().toByteArray().getBytes();
@@ -305,37 +368,328 @@ public class BurpBridgeService {
     }
 
     private JsonObject addToSiteMap(JsonObject args) {
-        String inputMode = getString(args, "input_mode");
-        if (!inputMode.isBlank() && !"burp_base64".equals(inputMode)) {
-            throw new IllegalArgumentException("input_mode must be burp_base64");
-        }
-        String url = getString(args, "url");
-        if (url.isBlank()) throw new IllegalArgumentException("url is required");
-        URI target = URI.create(url);
-        if (target.getHost() == null
-                || !("http".equalsIgnoreCase(target.getScheme()) || "https".equalsIgnoreCase(target.getScheme()))) {
-            throw new IllegalArgumentException("url must be an absolute http or https URL");
-        }
-        byte[] request = decodeBase64(args, "http_request_base64", true);
+        ResolvedRequest resolved = resolveRequest(args, MAX_SITE_MAP_MESSAGE_BYTES);
         byte[] response = decodeBase64(args, "http_response_base64", false);
-        if (request.length > MAX_SITE_MAP_MESSAGE_BYTES || response.length > MAX_SITE_MAP_MESSAGE_BYTES) {
-            throw new IllegalArgumentException("request or response exceeds 8 MiB");
+        if (response.length > MAX_SITE_MAP_MESSAGE_BYTES) {
+            throw new IllegalArgumentException("response exceeds " + humanBytes(MAX_SITE_MAP_MESSAGE_BYTES));
         }
-        String source = getString(args, "source");
-        if (source.isBlank()) source = "vigolium";
-        source = source.replace('\r', ' ').replace('\n', ' ').strip();
-        if (source.length() > 80) source = source.substring(0, 80);
+        String source = label(args, "source", 80, "vigolium");
 
-        HttpRequestResponse item = siteMapItemFactory.create(url, request, response, source);
+        HttpRequestResponse item = siteMapItemFactory.create(resolved.url(), resolved.request(), response, source);
         api.siteMap().add(item);
         logService.addLog(LogService.Level.INFO, "[Bridge] Added 1 item to Target Site map from " + source);
 
         JsonObject output = new JsonObject();
         output.addProperty("added", 1);
         output.addProperty("url", item.request().url());
-        output.addProperty("request_hash", sha256(request));
+        output.addProperty("request_hash", sha256(resolved.request()));
         output.addProperty("message", "added 1 item to Burp Target Site map");
         return output;
+    }
+
+    private JsonObject sendToRepeater(JsonObject args) {
+        ResolvedRequest resolved = resolveRequest(args, MAX_REPEATER_MESSAGE_BYTES);
+
+        String tabName = label(args, "tab_name", 64, "vigolium");
+        boolean alsoSend = getBoolean(args, "send");
+
+        // Fire the request through Burp first (so a rate-limit rejection does not
+        // send traffic), then stage the tab. The response cannot be painted into
+        // the Repeater tab — Montoya's sendToRepeater takes a request only — so it
+        // comes back in this reply instead.
+        reserveRepeaterSlot();
+        SendOutcome outcome = alsoSend ? executeSend(resolved, args) : null;
+
+        repeaterSender.send(resolved.url(), resolved.request(), tabName);
+        logService.addLog(LogService.Level.INFO, "[Bridge] Sent 1 request to Repeater tab " + tabName);
+
+        JsonObject output = new JsonObject();
+        output.addProperty("sent", 1);
+        output.addProperty("url", resolved.url());
+        output.addProperty("tab_name", tabName);
+        output.addProperty("request_hash", sha256(resolved.request()));
+        if (outcome != null) {
+            if (outcome.blocked()) {
+                // The tab still opens; only the auto-send is skipped so an out-of-scope
+                // target does not lose its staged tab.
+                output.addProperty("executed", false);
+                output.addProperty("error", "target is out of Burp scope; not auto-sent");
+            } else {
+                output.addProperty("executed", outcome.sent());
+                writeResponseFields(output, outcome);
+            }
+        }
+        output.addProperty("message", "sent 1 request to Burp Repeater");
+        return output;
+    }
+
+    private JsonObject send(JsonObject args) {
+        ResolvedRequest resolved = resolveRequest(args, MAX_SITE_MAP_MESSAGE_BYTES);
+        HttpMode mode = parseHttpMode(getString(args, "http_mode"));
+
+        SendOutcome outcome = executeSend(resolved, args);
+        if (outcome.blocked()) {
+            throw new ScopeBlockedException(SCOPE_BLOCKED_MESSAGE);
+        }
+
+        JsonObject output = new JsonObject();
+        output.addProperty("sent", outcome.sent() ? 1 : 0);
+        output.addProperty("url", resolved.url());
+        output.addProperty("request_hash", sha256(resolved.request()));
+        output.addProperty("http_mode", mode.name());
+        writeResponseFields(output, outcome);
+
+        boolean addToSiteMap = getBoolean(args, "add_to_sitemap");
+        if (addToSiteMap && outcome.sent()) {
+            String source = label(args, "source", 80, "vigolium-send");
+            HttpRequestResponse item =
+                    siteMapItemFactory.create(resolved.url(), resolved.request(), outcome.response(), source);
+            api.siteMap().add(item);
+            output.addProperty("added_to_sitemap", true);
+        } else {
+            output.addProperty("added_to_sitemap", false);
+        }
+
+        logService.addLog(
+                LogService.Level.INFO,
+                outcome.sent()
+                        ? "[Bridge] Sent 1 request via Burp to " + resolved.url() + " (HTTP " + outcome.statusCode()
+                                + ")"
+                        : "[Bridge] Send via Burp to " + resolved.url() + " failed: " + outcome.error());
+        return output;
+    }
+
+    private JsonObject sendToOrganizer(JsonObject args) {
+        ResolvedRequest resolved = resolveRequest(args, MAX_SITE_MAP_MESSAGE_BYTES);
+        byte[] response = decodeBase64(args, "http_response_base64", false);
+        boolean alsoSend = getBoolean(args, "send");
+
+        // A Repeater tab can only ever hold a request. The Organizer, by contrast,
+        // stores a request AND its response together and can forward to Repeater,
+        // so this is where an executed exchange is imported back for manual work.
+        SendOutcome outcome = null;
+        if (alsoSend && response.length == 0) {
+            outcome = executeSend(resolved, args);
+            if (outcome.blocked()) {
+                throw new ScopeBlockedException(SCOPE_BLOCKED_MESSAGE);
+            }
+            if (outcome.hasResponse()) response = outcome.response();
+        }
+        if (response.length > MAX_SITE_MAP_MESSAGE_BYTES) {
+            throw new IllegalArgumentException("response exceeds " + humanBytes(MAX_SITE_MAP_MESSAGE_BYTES));
+        }
+
+        // Burp's Organizer has no collection/title concept; the one editable label
+        // is the item's Notes (shown in the Notes column), plus a highlight colour
+        // for visually grouping a batch. Both are optional overrides.
+        String notes = sanitizeLabel(getString(args, "notes"), 200);
+        HighlightColor highlight = parseHighlight(getString(args, "highlight"));
+        String source = label(args, "source", 80, "vigolium");
+        HttpRequestResponse item = siteMapItemFactory.create(resolved.url(), resolved.request(), response, source);
+        applyItemAnnotations(item, notes, highlight);
+        organizerSender.send(item);
+        logService.addLog(LogService.Level.INFO, "[Bridge] Added 1 item to Organizer from " + source);
+
+        JsonObject output = new JsonObject();
+        output.addProperty("added", 1);
+        output.addProperty("url", resolved.url());
+        output.addProperty("request_hash", sha256(resolved.request()));
+        output.addProperty("has_response", response.length > 0);
+        if (!notes.isBlank()) output.addProperty("notes", notes);
+        output.addProperty("message", "added 1 item to Burp Organizer");
+        if (outcome != null) writeResponseFields(output, outcome);
+        return output;
+    }
+
+    /** Overrides the item's Organizer note/highlight when the caller supplied them. */
+    private static void applyItemAnnotations(HttpRequestResponse item, String notes, HighlightColor highlight) {
+        if (notes.isBlank() && highlight == null) return;
+        Annotations annotations = item.annotations();
+        if (annotations == null) return;
+        if (!notes.isBlank()) annotations.setNotes(notes);
+        if (highlight != null) annotations.setHighlightColor(highlight);
+    }
+
+    private static HighlightColor parseHighlight(String value) {
+        if (value.isBlank()) return null;
+        try {
+            return HighlightColor.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    "highlight must be one of none, red, orange, yellow, green, cyan, blue, pink, magenta, gray");
+        }
+    }
+
+    private void sendToOrganizerOnEdt(HttpRequestResponse item) {
+        runOnEdt(() -> api.organizer().sendToOrganizer(item));
+    }
+
+    private static void writeResponseFields(JsonObject output, SendOutcome outcome) {
+        if (outcome.error() != null) output.addProperty("error", outcome.error());
+        if (outcome.hasResponse()) {
+            byte[] response = outcome.response();
+            output.addProperty("status_code", outcome.statusCode());
+            // Only copy when the body actually exceeds the cap; the common case
+            // (response within 4 MiB) encodes the array directly without a copy.
+            byte[] emitted =
+                    response.length <= MAX_INSPECT_BYTES ? response : Arrays.copyOf(response, MAX_INSPECT_BYTES);
+            output.addProperty("response_base64", Base64.getEncoder().encodeToString(emitted));
+            output.addProperty("response_length", response.length);
+            output.addProperty("response_truncated", response.length > MAX_INSPECT_BYTES);
+            if (outcome.elapsedMillis() != null) output.addProperty("elapsed_ms", outcome.elapsedMillis());
+        }
+    }
+
+    private static long readSendTimeout(JsonObject args) {
+        if (args.has("timeout_ms") && !args.get("timeout_ms").isJsonNull()) {
+            return Math.max(1, Math.min(args.get("timeout_ms").getAsLong(), MAX_SEND_TIMEOUT_MILLIS));
+        }
+        return DEFAULT_SEND_TIMEOUT_MILLIS;
+    }
+
+    private static boolean getBoolean(JsonObject args, String name) {
+        return args.has(name) && !args.get(name).isJsonNull() && args.get(name).getAsBoolean();
+    }
+
+    /** Sanitised label from {@code args[name]} (trimmed to {@code maxLength}), or {@code fallback} when blank. */
+    private static String label(JsonObject args, String name, int maxLength, String fallback) {
+        String value = sanitizeLabel(getString(args, name), maxLength);
+        return value.isBlank() ? fallback : value;
+    }
+
+    private BridgeItem requireItem(String ref) {
+        BridgeItem item;
+        synchronized (references) {
+            item = references.get(ref);
+        }
+        if (item == null) throw new IllegalArgumentException("Burp ref expired or unknown; search again");
+        return item;
+    }
+
+    /** Sends the resolved request through Burp, sourcing http_mode/timeout/scope from the request args. */
+    private SendOutcome executeSend(ResolvedRequest resolved, JsonObject args) {
+        return requestSender.send(
+                resolved.url(),
+                resolved.request(),
+                parseHttpMode(getString(args, "http_mode")),
+                readSendTimeout(args),
+                settings.isBridgeInScopeOnly());
+    }
+
+    /** Resolves the target URL and raw request bytes from either a search {@code ref} or supplied base64. */
+    private ResolvedRequest resolveRequest(JsonObject args, int maxRequestBytes) {
+        String inputMode = getString(args, "input_mode");
+        if (!inputMode.isBlank() && !"burp_base64".equals(inputMode)) {
+            throw new IllegalArgumentException("input_mode must be burp_base64");
+        }
+
+        // Either replay an item from a previous search, or supply raw bytes directly.
+        String ref = getString(args, "ref");
+        String url;
+        byte[] request;
+        if (!ref.isBlank()) {
+            BridgeItem item = requireItem(ref);
+            url = item.request().url();
+            request = item.request().toByteArray().getBytes();
+        } else {
+            url = getString(args, "url");
+            if (url.isBlank()) throw new IllegalArgumentException("url is required when ref is not supplied");
+            request = decodeBase64(args, "http_request_base64", true);
+        }
+
+        URI target = URI.create(url);
+        if (target.getHost() == null
+                || !("http".equalsIgnoreCase(target.getScheme()) || "https".equalsIgnoreCase(target.getScheme()))) {
+            throw new IllegalArgumentException("url must be an absolute http or https URL");
+        }
+        if (request.length > maxRequestBytes) {
+            throw new IllegalArgumentException("request exceeds " + humanBytes(maxRequestBytes));
+        }
+        return new ResolvedRequest(url, request);
+    }
+
+    private static HttpMode parseHttpMode(String value) {
+        return switch (value.toLowerCase(Locale.ROOT)) {
+            case "", "auto" -> HttpMode.AUTO;
+            case "http1", "http_1", "http/1", "http/1.1" -> HttpMode.HTTP_1;
+            case "http2", "http_2", "http/2" -> HttpMode.HTTP_2;
+            case "http2_ignore_alpn", "http_2_ignore_alpn" -> HttpMode.HTTP_2_IGNORE_ALPN;
+            default -> throw new IllegalArgumentException(
+                    "http_mode must be one of auto, http1, http2, http2_ignore_alpn");
+        };
+    }
+
+    private SendOutcome sendThroughBurp(
+            String url, byte[] rawRequest, HttpMode mode, long timeoutMillis, boolean enforceInScope) {
+        HttpService service = HttpService.httpService(url);
+        HttpRequest request = HttpRequest.httpRequest(service, ByteArray.byteArray(rawRequest));
+        if (enforceInScope && !request.isInScope()) {
+            return SendOutcome.outOfScope();
+        }
+        RequestOptions options =
+                RequestOptions.requestOptions().withHttpMode(mode).withResponseTimeout(timeoutMillis);
+        try {
+            HttpRequestResponse result = api.http().sendRequest(request, options);
+            if (!result.hasResponse()) {
+                return new SendOutcome(false, true, 0, new byte[0], null, null);
+            }
+            byte[] response = result.response().toByteArray().getBytes();
+            Long elapsed = result.timingData()
+                    .map(timing ->
+                            timing.timeBetweenRequestSentAndEndOfResponse().toMillis())
+                    .orElse(null);
+            return new SendOutcome(false, true, result.response().statusCode(), response, elapsed, null);
+        } catch (RuntimeException e) {
+            String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            return new SendOutcome(false, false, 0, new byte[0], null, message);
+        }
+    }
+
+    private static String humanBytes(int bytes) {
+        return bytes >= 1024 * 1024 ? (bytes / (1024 * 1024)) + " MiB" : (bytes / 1024) + " KiB";
+    }
+
+    /** Sliding one-minute window so a runaway client cannot bury the UI in Repeater tabs. */
+    private void reserveRepeaterSlot() {
+        Instant now = Instant.now();
+        Instant cutoff = now.minusSeconds(60);
+        synchronized (repeaterSends) {
+            while (!repeaterSends.isEmpty() && repeaterSends.peekFirst().isBefore(cutoff)) {
+                repeaterSends.removeFirst();
+            }
+            if (repeaterSends.size() >= MAX_REPEATER_TABS_PER_MINUTE) {
+                throw new RateLimitedException(
+                        "Repeater send limit reached (" + MAX_REPEATER_TABS_PER_MINUTE + " per minute); retry shortly");
+            }
+            repeaterSends.addLast(now);
+        }
+    }
+
+    private void sendToRepeaterOnEdt(String url, byte[] rawRequest, String tabName) {
+        HttpService service = HttpService.httpService(url);
+        HttpRequest request = HttpRequest.httpRequest(service, ByteArray.byteArray(rawRequest));
+        runOnEdt(() -> api.repeater().sendToRepeater(request, tabName));
+    }
+
+    private static void runOnEdt(Runnable action) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            action.run();
+            return;
+        }
+        try {
+            SwingUtilities.invokeAndWait(action);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while sending to Repeater", e);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            throw new IllegalStateException(cause.getMessage(), cause);
+        }
+    }
+
+    private static String sanitizeLabel(String value, int maxLength) {
+        String sanitized = value.replace('\r', ' ').replace('\n', ' ').strip();
+        return sanitized.length() > maxLength ? sanitized.substring(0, maxLength) : sanitized;
     }
 
     private static byte[] decodeBase64(JsonObject args, String name, boolean required) {
@@ -459,6 +813,9 @@ public class BurpBridgeService {
         synchronized (references) {
             references.clear();
         }
+        synchronized (repeaterSends) {
+            repeaterSends.clear();
+        }
     }
 
     private static String getString(JsonObject object, String name) {
@@ -490,6 +847,47 @@ public class BurpBridgeService {
     @FunctionalInterface
     interface SiteMapItemFactory {
         HttpRequestResponse create(String url, byte[] rawRequest, byte[] rawResponse, String source);
+    }
+
+    @FunctionalInterface
+    interface RepeaterSender {
+        void send(String url, byte[] rawRequest, String tabName);
+    }
+
+    @FunctionalInterface
+    interface OrganizerSender {
+        void send(HttpRequestResponse item);
+    }
+
+    /** Seam over Burp's HTTP stack so {@code /send} is testable without a live Burp runtime. */
+    @FunctionalInterface
+    interface RequestSender {
+        SendOutcome send(String url, byte[] rawRequest, HttpMode mode, long timeoutMillis, boolean enforceInScope);
+    }
+
+    record SendOutcome(
+            boolean blocked, boolean sent, int statusCode, byte[] response, Long elapsedMillis, String error) {
+        static SendOutcome outOfScope() {
+            return new SendOutcome(true, false, 0, new byte[0], null, null);
+        }
+
+        boolean hasResponse() {
+            return response.length > 0;
+        }
+    }
+
+    private record ResolvedRequest(String url, byte[] request) {}
+
+    private static final class RateLimitedException extends RuntimeException {
+        private RateLimitedException(String message) {
+            super(message);
+        }
+    }
+
+    private static final class ScopeBlockedException extends RuntimeException {
+        private ScopeBlockedException(String message) {
+            super(message);
+        }
     }
 
     private final class BridgeHttpServer extends NanoHTTPD {
