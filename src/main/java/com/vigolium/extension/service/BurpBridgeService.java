@@ -64,6 +64,22 @@ public class BurpBridgeService {
     private static final long MAX_SEND_TIMEOUT_MILLIS = 120_000L;
     private static final String SCOPE_BLOCKED_MESSAGE =
             "target is out of Burp scope; disable in-scope-only or add it to Target scope";
+    /** Protocol identifier. The Caido plugin reports the same value on purpose. */
+    private static final String BRIDGE_SERVICE = "vigolium-burp-bridge";
+    /**
+     * Who actually answered — the field that tells Vigolium to label pulled
+     * records `burp` rather than `caido`.
+     *
+     * Vigolium already treats a reply with no implementation as Burp, so this is
+     * not needed for correct labelling. It is sent so that *absent* means "a
+     * build older than this one" and nothing else: without it, "old jar" and
+     * "Burp" are the same observation and the diagnostic log line that fires on
+     * a missing identity could never be acted on.
+     *
+     * Echoed on /search and /inspect as well as /health, matching the Caido
+     * plugin, so a single-record inspect with no preceding search still carries it.
+     */
+    private static final String BRIDGE_IMPLEMENTATION = "vigolium-burp-bridge";
 
     private final MontoyaApi api;
     private final BridgeSettings settings;
@@ -183,8 +199,7 @@ public class BurpBridgeService {
                     return new ConnectionTestResult(false, "Bridge connection failed: HTTP " + response.statusCode());
                 }
                 JsonObject body = JsonParser.parseString(response.body()).getAsJsonObject();
-                if (!"ok".equals(getString(body, "status"))
-                        || !"vigolium-burp-bridge".equals(getString(body, "service"))) {
+                if (!"ok".equals(getString(body, "status")) || !BRIDGE_SERVICE.equals(getString(body, "service"))) {
                     return new ConnectionTestResult(false, "Bridge connection failed: unexpected health response");
                 }
                 return new ConnectionTestResult(true, "Bridge connection successful");
@@ -227,7 +242,8 @@ public class BurpBridgeService {
         }
         JsonObject response = new JsonObject();
         response.addProperty("status", "ok");
-        response.addProperty("service", "vigolium-burp-bridge");
+        response.addProperty("service", BRIDGE_SERVICE);
+        response.addProperty("implementation", BRIDGE_IMPLEMENTATION);
         response.addProperty("read_only", false);
         response.addProperty("loopback_only", true);
         response.addProperty("in_scope_only", settings.isBridgeInScopeOnly());
@@ -331,6 +347,7 @@ public class BurpBridgeService {
         }
         JsonObject output = new JsonObject();
         output.addProperty("total", total);
+        output.addProperty("implementation", BRIDGE_IMPLEMENTATION);
         output.addProperty("offset", from);
         output.addProperty("returned", records.size());
         output.addProperty("has_more", to < total);
@@ -348,6 +365,7 @@ public class BurpBridgeService {
         byte[] response = item.hasResponse() ? item.response().toByteArray().getBytes() : new byte[0];
         JsonObject output = new JsonObject();
         output.addProperty("ref", ref);
+        output.addProperty("implementation", BRIDGE_IMPLEMENTATION);
         output.addProperty("url", item.request().url());
         // Small interactive inspections keep the legacy text fields. Larger
         // persistence reads use base64 only so binary messages are not doubled

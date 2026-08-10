@@ -2,7 +2,7 @@
 
 A Burp Suite extension for sending HTTP traffic to the Vigolium security scanning engine, reviewing the resulting findings, and synchronizing traffic in both directions. It supports explicit dispatch from Burp, automatic Proxy forwarding, Target Site map snapshots, and an optional loopback-only live bridge for CLI and server integrations.
 
-- **Version:** `0.2.1`
+- **Version:** `0.2.2`
 - **GitHub:** [github.com/vigolium/vigolium](https://github.com/vigolium/vigolium)
 - **Docs:** [docs.vigolium.com](https://docs.vigolium.com/)
 - **Site:** [www.vigolium.com](https://www.vigolium.com/)
