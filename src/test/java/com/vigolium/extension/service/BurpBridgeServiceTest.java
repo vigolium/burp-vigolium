@@ -17,6 +17,8 @@ import burp.api.montoya.core.ByteArray;
 import burp.api.montoya.core.HighlightColor;
 import burp.api.montoya.http.HttpMode;
 import burp.api.montoya.http.message.HttpRequestResponse;
+import burp.api.montoya.proxy.Proxy;
+import burp.api.montoya.proxy.ProxyHistoryFilter;
 import burp.api.montoya.sitemap.SiteMap;
 import burp.api.montoya.sitemap.SiteMapFilter;
 import burp.api.montoya.sitemap.SiteMapNode;
@@ -35,6 +37,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -727,6 +730,68 @@ class BurpBridgeServiceTest {
     }
 
     @Test
+    void proxyHistorySearchAlsoReturnsBridgeImportedSiteMapItems() throws Exception {
+        int port = freeLoopbackPort();
+        BridgeSettings settings = mock(BridgeSettings.class);
+        when(settings.isBridgeEnabled()).thenReturn(true);
+        when(settings.getBridgeListenUrl()).thenReturn("http://127.0.0.1:" + port);
+
+        MontoyaApi api = mock(MontoyaApi.class);
+        Proxy proxy = mock(Proxy.class);
+        when(api.proxy()).thenReturn(proxy);
+        when(proxy.history(any(ProxyHistoryFilter.class))).thenReturn(List.of());
+        stubSiteMap(
+                api,
+                annotated(siteMapItem("https://periscope.test/imported", true), "Imported from vigolium-db "),
+                siteMapItem("https://periscope.test/crawled", true));
+
+        service = new BurpBridgeService(api, settings, new LogService());
+        service.start();
+
+        HttpResponse<String> response = postJson(
+                port, "/api/burp-bridge/search", "{\"location\":\"proxy_history\",\"host\":\"periscope.test\"}");
+
+        assertEquals(200, response.statusCode());
+        // Only the imported item: a crawled site map row belongs to an explicit
+        // location=sitemap search, not to proxy history.
+        assertEquals(
+                1,
+                JsonParser.parseString(response.body())
+                        .getAsJsonObject()
+                        .get("total")
+                        .getAsInt());
+        assertTrue(response.body().contains("/imported"), response.body());
+        assertFalse(response.body().contains("/crawled"), response.body());
+        assertTrue(response.body().contains("\"location\":\"sitemap\""), response.body());
+    }
+
+    @Test
+    void siteMapSearchIgnoresNodesWithoutARequestResponse() throws Exception {
+        int port = freeLoopbackPort();
+        BridgeSettings settings = mock(BridgeSettings.class);
+        when(settings.isBridgeEnabled()).thenReturn(true);
+        when(settings.getBridgeListenUrl()).thenReturn("http://127.0.0.1:" + port);
+
+        MontoyaApi api = mock(MontoyaApi.class);
+        // A folder row in the Target tree: a node with no request behind it.
+        stubSiteMap(api, null, siteMapItem("https://example.test/real", true));
+
+        service = new BurpBridgeService(api, settings, new LogService());
+        service.start();
+
+        HttpResponse<String> response = postJson(port, "/api/burp-bridge/search", "{\"location\":\"sitemap\"}");
+
+        assertEquals(200, response.statusCode());
+        assertEquals(
+                1,
+                JsonParser.parseString(response.body())
+                        .getAsJsonObject()
+                        .get("total")
+                        .getAsInt());
+        assertTrue(response.body().contains("/real"), response.body());
+    }
+
+    @Test
     void unlimitedSearchesAreCappedToReferenceCacheCapacity() {
         assertEquals(10_000, BurpBridgeService.cappedEndIndex(20_000, 0, 0));
         assertEquals(15_000, BurpBridgeService.cappedEndIndex(20_000, 5_000, 0));
@@ -739,6 +804,31 @@ class BurpBridgeServiceTest {
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
         return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    /** Stubs {@code api.siteMap()} over {@code items}; a null entry stands for a Target tree folder node. */
+    private static void stubSiteMap(MontoyaApi api, HttpRequestResponse... items) {
+        SiteMap siteMap = mock(SiteMap.class);
+        when(api.siteMap()).thenReturn(siteMap);
+        List<HttpRequestResponse> all = Arrays.asList(items);
+        when(siteMap.requestResponses(any(SiteMapFilter.class))).thenAnswer(invocation -> {
+            SiteMapFilter filter = invocation.getArgument(0);
+            List<HttpRequestResponse> matches = new ArrayList<>();
+            for (HttpRequestResponse item : all) {
+                SiteMapNode node = mock(SiteMapNode.class);
+                when(node.requestResponse()).thenReturn(item);
+                if (filter.matches(node)) matches.add(item);
+            }
+            return matches;
+        });
+    }
+
+    /** Gives {@code item} the notes Burp would have persisted for it. */
+    private static HttpRequestResponse annotated(HttpRequestResponse item, String notesPrefix) {
+        Annotations annotations = mock(Annotations.class);
+        when(annotations.notes()).thenReturn(notesPrefix + "via Vigolium bridge");
+        when(item.annotations()).thenReturn(annotations);
+        return item;
     }
 
     private static HttpRequestResponse siteMapItem(String url, boolean inScope) {

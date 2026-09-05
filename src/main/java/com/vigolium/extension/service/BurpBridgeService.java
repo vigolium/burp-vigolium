@@ -11,6 +11,7 @@ import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
 import burp.api.montoya.proxy.ProxyHttpRequestResponse;
+import burp.api.montoya.sitemap.SiteMapNode;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -80,6 +81,17 @@ public class BurpBridgeService {
      * plugin, so a single-record inspect with no preceding search still carries it.
      */
     private static final String BRIDGE_IMPLEMENTATION = "vigolium-burp-bridge";
+    /**
+     * Suffix stamped into the Annotations notes of every item this bridge puts
+     * into the Target site map, and the only way a later search can tell those
+     * items apart from the rest of the site map.
+     *
+     * Burp exposes no provenance on a site map entry, so without a marker of our
+     * own "imported through the bridge" and "crawled by Burp" are the same
+     * observation — and folding the whole site map into a proxy history search
+     * would report every genuinely proxied request twice.
+     */
+    private static final String IMPORT_MARKER = "via Vigolium bridge";
 
     private final MontoyaApi api;
     private final BridgeSettings settings;
@@ -316,11 +328,17 @@ public class BurpBridgeService {
                     api.proxy().history(proxyItem -> criteria.matches(BridgeItem.fromProxy(proxyItem)))) {
                 matches.add(BridgeItem.fromProxy(item));
             }
+            // Anything pushed in through /sitemap lands in the Target site map and
+            // nowhere else — it never crossed the proxy, so proxy history cannot
+            // hold it. Vigolium's client always asks for proxy_history (the
+            // location is hardcoded there), which made an import write-only: the
+            // records reached Burp and no later search could read them back.
+            // Folding them in here closes that round trip. Only bridge-imported
+            // items are added, so a request Burp genuinely proxied is still
+            // reported exactly once even though the site map also holds it.
+            matches.addAll(siteMapMatches(criteria, true));
         } else {
-            for (burp.api.montoya.http.message.HttpRequestResponse item : api.siteMap()
-                    .requestResponses(node -> criteria.matches(BridgeItem.fromSiteMap(node.requestResponse())))) {
-                matches.add(BridgeItem.fromSiteMap(item));
-            }
+            matches.addAll(siteMapMatches(criteria, false));
         }
 
         matches.sort(criteria.comparator());
@@ -333,7 +351,10 @@ public class BurpBridgeService {
             String ref = remember(item);
             JsonObject summary = new JsonObject();
             summary.addProperty("ref", ref);
-            summary.addProperty("location", criteria.location());
+            // Per item, not per query: a proxy_history search can now carry site
+            // map imports alongside proxied traffic, so a single label would lie
+            // about half the page.
+            summary.addProperty("location", item.location());
             summary.addProperty("method", item.request().method());
             summary.addProperty("url", item.request().url());
             summary.addProperty(
@@ -353,6 +374,27 @@ public class BurpBridgeService {
         output.addProperty("has_more", to < total);
         output.add("records", records);
         return output;
+    }
+
+    /**
+     * Site map items matching {@code criteria}, optionally narrowed to the ones this bridge imported.
+     */
+    private List<BridgeItem> siteMapMatches(SearchCriteria criteria, boolean importsOnly) {
+        List<BridgeItem> matches = new ArrayList<>();
+        for (HttpRequestResponse item :
+                api.siteMap().requestResponses(node -> siteMapNodeMatches(node, criteria, importsOnly))) {
+            BridgeItem candidate = BridgeItem.fromSiteMap(item);
+            if (candidate != null) matches.add(candidate);
+        }
+        return matches;
+    }
+
+    private static boolean siteMapNodeMatches(SiteMapNode node, SearchCriteria criteria, boolean importsOnly) {
+        if (node == null) return false;
+        BridgeItem candidate = BridgeItem.fromSiteMap(node.requestResponse());
+        if (candidate == null) return false;
+        if (importsOnly && !candidate.isBridgeImport()) return false;
+        return criteria.matches(candidate);
     }
 
     private JsonObject inspect(JsonObject args) {
@@ -729,7 +771,7 @@ public class BurpBridgeService {
         HttpRequest request = HttpRequest.httpRequest(service, ByteArray.byteArray(rawRequest));
         HttpResponse response =
                 rawResponse.length == 0 ? null : HttpResponse.httpResponse(ByteArray.byteArray(rawResponse));
-        Annotations annotations = Annotations.annotations("Imported from " + source + " via Vigolium bridge");
+        Annotations annotations = Annotations.annotations("Imported from " + source + " " + IMPORT_MARKER);
         return HttpRequestResponse.httpRequestResponse(request, response, annotations);
     }
 
@@ -971,9 +1013,22 @@ public class BurpBridgeService {
     public record ConnectionTestResult(boolean successful, String message) {}
 
     private record BridgeItem(
-            HttpRequest request, HttpResponse response, boolean hasResponse, String notes, Instant time) {
-        static BridgeItem fromSiteMap(burp.api.montoya.http.message.HttpRequestResponse item) {
+            String location,
+            HttpRequest request,
+            HttpResponse response,
+            boolean hasResponse,
+            String notes,
+            Instant time) {
+
+        /**
+         * Null for a node that carries no request — the Target tree holds a node per path segment, and the folder rows
+         * Burp has never issued a request for have nothing to match on. Returning null rather than a half-built item
+         * keeps the NPE out of the filter lambda, where it would abort the whole search rather than skip one row.
+         */
+        static BridgeItem fromSiteMap(HttpRequestResponse item) {
+            if (item == null || item.request() == null) return null;
             return new BridgeItem(
+                    "sitemap",
                     item.request(),
                     item.hasResponse() ? item.response() : null,
                     item.hasResponse(),
@@ -983,11 +1038,17 @@ public class BurpBridgeService {
 
         static BridgeItem fromProxy(ProxyHttpRequestResponse item) {
             return new BridgeItem(
+                    "proxy_history",
                     item.finalRequest(),
                     item.hasResponse() ? item.response() : null,
                     item.hasResponse(),
                     item.annotations() != null ? item.annotations().notes() : "",
                     item.time() != null ? item.time().toInstant() : null);
+        }
+
+        /** True for a site map item this bridge imported — see {@link BurpBridgeService#IMPORT_MARKER}. */
+        boolean isBridgeImport() {
+            return notes != null && notes.contains(IMPORT_MARKER);
         }
 
         boolean contains(String text) {
